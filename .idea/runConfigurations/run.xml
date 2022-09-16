@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="run" type="GoApplicationRunConfiguration" factoryName="Go Application">
+    <module name="gossip-cluster" />
+    <working_directory value="$PROJECT_DIR$" />
+    <kind value="DIRECTORY" />
+    <package value="github.com/divilla/gossip-cluster/" />
+    <directory value="$PROJECT_DIR$/cmd/console" />
+    <filePath value="$PROJECT_DIR$" />
+    <method v="2" />
+  </configuration>
+</component>
