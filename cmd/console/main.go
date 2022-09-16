@@ -1,16 +1,14 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"github.com/divilla/gossip-cluster/internal/xml"
 	"github.com/gookit/gcli/v3"
 	"github.com/gookit/gcli/v3/_examples/cmd"
 	"github.com/hashicorp/memberlist"
-	"net"
+	"go.uber.org/zap"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 )
 
 func main() {
@@ -18,10 +16,18 @@ func main() {
 	quitCh := make(chan os.Signal, 1)
 	signal.Notify(quitCh, os.Interrupt)
 
-	cluster, err := memberlist.Create(memberlist.DefaultLocalConfig())
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+
+	cfg := memberlist.DefaultLocalConfig()
+	ml, err := memberlist.Create(memberlist.DefaultLocalConfig())
 	if err != nil {
 		panic("Failed to create member list: " + err.Error())
 	}
+	cfg.Delegate = xml.NewDelegate(logger, ml)
 
 	options := struct {
 		Alias string
@@ -51,38 +57,38 @@ func main() {
 		Desc:     "start leader",
 		Examples: "gc start --alias host-1 127.0.0.1:8081",
 		Func: func(cmd *gcli.Command, args []string) error {
-			if len(args) == 0 {
-				gcli.Print("missing argument(s), run gc start --help\n")
-			}
+			//if len(args) == 0 {
+			//	gcli.Print("missing argument(s), run gc start --help\n")
+			//}
+			//
+			//ln := ml.LocalNode()
+			//ln.Name = options.Alias
+			//
+			//address := strings.Split(args[0], ":")
+			//if len(address) == 1 {
+			//	ip := net.ParseIP(address[0])
+			//	if ip == nil {
+			//		return errors.New("invalid ip address, expected format: 127.0.0.1")
+			//	}
+			//
+			//	ln.Addr = ip
+			//}
+			//if len(address) == 2 {
+			//	ip := net.ParseIP(address[0])
+			//	if ip == nil {
+			//		return errors.New("invalid ip address, expected format: 127.0.0.1:8001")
+			//	}
+			//
+			//	ln.Addr = ip
+			//
+			//	if port, err := strconv.Atoi(address[1]); err != nil {
+			//		return errors.New("invalid port, expected format: 127.0.0.1:8001")
+			//	} else {
+			//		ln.Port = uint16(port)
+			//	}
+			//}
 
-			ln := cluster.LocalNode()
-			ln.Name = options.Alias
-
-			address := strings.Split(args[0], ":")
-			if len(address) == 1 {
-				ip := net.ParseIP(address[0])
-				if ip == nil {
-					return errors.New("invalid ip address, expected format: 127.0.0.1")
-				}
-
-				ln.Addr = ip
-			}
-			if len(address) == 2 {
-				ip := net.ParseIP(address[0])
-				if ip == nil {
-					return errors.New("invalid ip address, expected format: 127.0.0.1:8001")
-				}
-
-				ln.Addr = ip
-
-				if port, err := strconv.Atoi(address[1]); err != nil {
-					return errors.New("invalid port, expected format: 127.0.0.1:8001")
-				} else {
-					ln.Port = uint16(port)
-				}
-			}
-
-			for _, member := range cluster.Members() {
+			for _, member := range ml.Members() {
 				fmt.Printf("Member: %s %s:%d\n", member.Name, member.Addr, member.Port)
 			}
 
