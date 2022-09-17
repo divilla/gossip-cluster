@@ -2,6 +2,7 @@
   <configuration default="false" name="run" type="GoApplicationRunConfiguration" factoryName="Go Application">
     <module name="gossip-cluster" />
     <working_directory value="$PROJECT_DIR$" />
+    <parameters value="join --name localhost --ip 127.0.0.1 --port 8082 127.0.0.1:8081" />
     <kind value="DIRECTORY" />
     <package value="github.com/divilla/gossip-cluster/" />
     <directory value="$PROJECT_DIR$/cmd/console" />

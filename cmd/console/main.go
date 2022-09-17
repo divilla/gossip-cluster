@@ -4,11 +4,20 @@ import (
 	"fmt"
 	"github.com/divilla/gossip-cluster/internal/xml"
 	"github.com/gookit/gcli/v3"
-	"github.com/gookit/gcli/v3/_examples/cmd"
 	"github.com/hashicorp/memberlist"
 	"go.uber.org/zap"
 	"os"
 	"os/signal"
+)
+
+type (
+	options struct {
+		DNSName            string
+		BindIPAddress      string
+		BindPort           int
+		AdvertiseIPAddress string
+		AdvertisePort      int
+	}
 )
 
 func main() {
@@ -22,94 +31,160 @@ func main() {
 	}
 	defer logger.Sync()
 
-	cfg := memberlist.DefaultLocalConfig()
-	ml, err := memberlist.Create(memberlist.DefaultLocalConfig())
-	if err != nil {
-		panic("Failed to create member list: " + err.Error())
-	}
-	cfg.Delegate = xml.NewDelegate(logger, ml)
-
-	options := struct {
-		Alias string
-	}{}
+	opt := options{}
 
 	app := gcli.NewApp()
-	app.Version = "1.0.3"
+	app.Version = "0.1"
 	app.Desc = "Gossip Cluster"
 	// app.SetVerbose(gcli.VerbDebug)
 
-	app.Add(cmd.Example)
+	//app.Add(cmd.Example)
+
 	app.Add(&gcli.Command{
-		Name: "demo",
-		// allow color tag and {$cmd} will be replace to 'demo'
-		Desc: "this is a description <info>message</> for {$cmd}",
-		Subs: []*gcli.Command{
-			// ... allow add subcommands
-		},
-		Aliases: []string{"dm"},
-		Func: func(cmd *gcli.Command, args []string) error {
-			gcli.Print("hello, in the demo command\n")
-			return nil
-		},
-	})
-	app.Add(&gcli.Command{
-		Name:     "start",
-		Desc:     "start leader",
-		Examples: "gc start --alias host-1 127.0.0.1:8081",
-		Func: func(cmd *gcli.Command, args []string) error {
-			//if len(args) == 0 {
-			//	gcli.Print("missing argument(s), run gc start --help\n")
-			//}
-			//
-			//ln := ml.LocalNode()
-			//ln.Name = options.Alias
-			//
-			//address := strings.Split(args[0], ":")
-			//if len(address) == 1 {
-			//	ip := net.ParseIP(address[0])
-			//	if ip == nil {
-			//		return errors.New("invalid ip address, expected format: 127.0.0.1")
-			//	}
-			//
-			//	ln.Addr = ip
-			//}
-			//if len(address) == 2 {
-			//	ip := net.ParseIP(address[0])
-			//	if ip == nil {
-			//		return errors.New("invalid ip address, expected format: 127.0.0.1:8001")
-			//	}
-			//
-			//	ln.Addr = ip
-			//
-			//	if port, err := strconv.Atoi(address[1]); err != nil {
-			//		return errors.New("invalid port, expected format: 127.0.0.1:8001")
-			//	} else {
-			//		ln.Port = uint16(port)
-			//	}
-			//}
-
-			for _, member := range ml.Members() {
-				fmt.Printf("Member: %s %s:%d\n", member.Name, member.Addr, member.Port)
-			}
-
-			<-quitCh
-
-			return nil
-		},
+		Name:       "start",
+		Desc:       "Start a cluster with first node.",
+		Examples:   "gc start --name localhost --ip 127.0.0.1 --port 8081",
+		Flags:      makeFlags(),
+		Func:       makeStartCommand(logger, &opt, quitCh),
 		Help:       "this is help",
 		HelpRender: nil,
-		Config: func(c *gcli.Command) {
-			c.AddArg("address", "host:port", true)
-			c.StrVar(&options.Alias, &gcli.FlagMeta{
-				Name:     "alias",
-				Desc:     "alias to be used instead of address:port",
-				Shorts:   []string{"a"},
-				Required: true,
-			})
-		},
+		Config:     makeConfig(&opt),
+	})
+
+	app.Add(&gcli.Command{
+		Name:       "join",
+		Desc:       "Join a cluster with nodes passed as arguments.",
+		Examples:   "gc start --name localhost --ip 127.0.0.1 --port 8082 127.0.0.1:8081",
+		Flags:      makeFlags(),
+		Func:       makeJoinCommand(logger, &opt, quitCh),
+		Help:       "this is help",
+		HelpRender: nil,
+		Config:     makeConfig(&opt),
 	})
 
 	app.Run(nil)
 
 	<-quitCh
+}
+
+func makeFlags() gcli.Flags {
+	flags := gcli.NewFlags()
+	flags.SetConfig(&gcli.FlagsConfig{
+		WithoutType: true,
+		DescNewline: false,
+		Alignment:   gcli.AlignLeft,
+		TagName:     gcli.FlagTagName,
+	})
+
+	return *flags
+}
+
+func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) func(*gcli.Command, []string) error {
+	return func(cmd *gcli.Command, args []string) error {
+		cfg := memberlist.DefaultLocalConfig()
+		parseOptions(cfg, opt)
+
+		ml, err := memberlist.Create(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create first node: %w", err)
+		}
+		cfg.Delegate = xml.NewDelegate(logger, ml)
+
+		logger.Info("start")
+		for _, mem := range ml.Members() {
+			logger.Info("member", zap.String("dns-name", mem.String()), zap.String("address", mem.Address()))
+		}
+		fmt.Println()
+
+		<-quitCh
+
+		return nil
+	}
+}
+
+func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) func(*gcli.Command, []string) error {
+	return func(cmd *gcli.Command, args []string) error {
+		cfg := memberlist.DefaultLocalConfig()
+		parseOptions(cfg, opt)
+
+		ml, err := memberlist.Create(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create first node: %w", err)
+		}
+		cfg.Delegate = xml.NewDelegate(logger, ml)
+
+		n, err := ml.Join(args)
+		if err != nil {
+			return fmt.Errorf("failed to join the cluster: %w", err)
+		}
+
+		logger.Info("join", zap.Int("nodes", n))
+		for _, mem := range ml.Members() {
+			logger.Info("member", zap.String("dns-name", mem.String()), zap.String("address", mem.Address()))
+		}
+		fmt.Println()
+
+		<-quitCh
+
+		return nil
+	}
+}
+
+func parseOptions(cfg *memberlist.Config, opt *options) {
+	if opt.DNSName != "" {
+		cfg.Name = opt.DNSName
+	}
+
+	if opt.BindIPAddress != "" {
+		cfg.BindAddr = opt.BindIPAddress
+		cfg.AdvertiseAddr = opt.BindIPAddress
+	}
+	if opt.AdvertiseIPAddress != "" {
+		cfg.AdvertiseAddr = opt.AdvertiseIPAddress
+	}
+
+	if opt.BindPort != 0 {
+		cfg.BindPort = opt.BindPort
+		cfg.AdvertisePort = opt.BindPort
+	}
+	if opt.AdvertisePort != 0 {
+		cfg.AdvertisePort = opt.AdvertisePort
+	}
+}
+
+func makeConfig(opt *options) func(*gcli.Command) {
+	return func(c *gcli.Command) {
+		c.AddArg("nodes", "Cluster nodes list.", false, true)
+
+		c.StrVar(&opt.DNSName, &gcli.FlagMeta{
+			Name:     "name",
+			Desc:     "Node's dns name.",
+			Shorts:   []string{"n"},
+			Required: false,
+		})
+		c.StrVar(&opt.BindIPAddress, &gcli.FlagMeta{
+			Name:     "ip",
+			Desc:     "Address to bind to. The port is used for both UDP and TCP gossip.",
+			Shorts:   []string{"i"},
+			Required: false,
+		})
+		c.IntVar(&opt.BindPort, &gcli.FlagMeta{
+			Name:     "port",
+			Desc:     "Port to listen on. The port is used for both UDP and TCP gossip.",
+			Shorts:   []string{"p"},
+			Required: false,
+		})
+		c.StrVar(&opt.AdvertiseIPAddress, &gcli.FlagMeta{
+			Name:     "advertise-ip",
+			Desc:     "Address to advertise to other cluster members. Used for nat traversal.",
+			Shorts:   []string{"ai"},
+			Required: false,
+		})
+		c.IntVar(&opt.AdvertisePort, &gcli.FlagMeta{
+			Name:     "advertise-port",
+			Desc:     "Port to advertise to other cluster members. Used for nat traversal.",
+			Shorts:   []string{"ap"},
+			Required: false,
+		})
+	}
 }

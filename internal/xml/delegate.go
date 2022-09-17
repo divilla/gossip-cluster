@@ -2,7 +2,6 @@ package xml
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/hashicorp/memberlist"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -12,7 +11,7 @@ import (
 type (
 	Delegate struct {
 		logger     *zap.Logger
-		memberlist *memberlist.Memberlist
+		ml         *memberlist.Memberlist
 		broadcasts *memberlist.TransmitLimitedQueue
 		items      map[string]string
 		rwm        sync.RWMutex
@@ -26,9 +25,14 @@ type (
 
 func NewDelegate(logger *zap.Logger, ml *memberlist.Memberlist) *Delegate {
 	return &Delegate{
-		logger:     logger,
-		memberlist: ml,
-		items:      make(map[string]string),
+		logger: logger,
+		items:  make(map[string]string),
+		broadcasts: &memberlist.TransmitLimitedQueue{
+			NumNodes: func() int {
+				return ml.NumMembers()
+			},
+			RetransmitMult: 3,
+		},
 	}
 }
 
@@ -69,12 +73,7 @@ func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
 
 func (d *Delegate) LocalState(join bool) []byte {
 	if join {
-		for _, mem := range d.memberlist.Members() {
-			d.logger.Info("Member",
-				zap.String("Name", mem.Name),
-				zap.String("Address", fmt.Sprintf("%s:%d", mem.Addr, mem.Port)))
-		}
-
+		d.logger.Info("xml.Delegate.LocalState", zap.Bool("join", true))
 		return nil
 	}
 
