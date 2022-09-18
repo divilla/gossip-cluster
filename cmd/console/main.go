@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/divilla/gossip-cluster/internal/xml"
+	"github.com/divilla/gossip-cluster/internal/memlistconf"
 	"github.com/gookit/gcli/v3"
 	"github.com/hashicorp/memberlist"
 	"go.uber.org/zap"
@@ -90,7 +90,8 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 		if err != nil {
 			return fmt.Errorf("failed to create first node: %w", err)
 		}
-		cfg.Delegate = xml.NewDelegate(logger, ml)
+		state := memlistconf.NewState(ml.LocalNode().Name, memlistconf.Starting)
+		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
 
 		logger.Info("start")
 		for _, mem := range ml.Members() {
@@ -114,23 +115,22 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 		if err != nil {
 			return fmt.Errorf("failed to create first node: %w", err)
 		}
-		cfg.Delegate = xml.NewDelegate(logger, ml)
+		state := memlistconf.NewState(ml.LocalNode().Name, memlistconf.Starting)
+		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
 
 		for i := 0; i < 30; i++ {
-			_, err = ml.Join(args)
-			if err != nil {
-				logger.Warn("join failed", zap.Int("attempt", i+1), zap.Int("nr", ml.NumMembers()), zap.Error(err))
-			} else {
+			if _, err = ml.Join(args); err == nil {
 				break
 			}
 
-			time.Sleep(time.Second)
+			select {
+			case <-quitCh:
+				return err
+			case <-time.After(time.Second):
+				logger.Warn("join failed", zap.Int("attempt", i+1), zap.Int("nr", ml.NumMembers()), zap.Error(err))
+			}
 		}
 
-		logger.Info("join success", zap.Int("nodes", ml.NumMembers()))
-		for _, mem := range ml.Members() {
-			logger.Info("member", zap.String("dns-name", mem.String()), zap.String("address", mem.Address()))
-		}
 		fmt.Println()
 
 		<-quitCh

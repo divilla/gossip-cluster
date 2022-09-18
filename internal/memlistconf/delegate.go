@@ -1,4 +1,4 @@
-package xml
+package memlistconf
 
 import (
 	"encoding/json"
@@ -13,6 +13,7 @@ type (
 		logger *zap.Logger
 		ml     *memberlist.Memberlist
 		tlq    *memberlist.TransmitLimitedQueue
+		state  *State
 		items  map[string]string
 		rwm    sync.RWMutex
 	}
@@ -23,7 +24,7 @@ type (
 	}
 )
 
-func NewDelegate(logger *zap.Logger, ml *memberlist.Memberlist) *Delegate {
+func NewDelegate(logger *zap.Logger, ml *memberlist.Memberlist, state *State) *Delegate {
 	return &Delegate{
 		logger: logger,
 		items:  make(map[string]string),
@@ -33,14 +34,18 @@ func NewDelegate(logger *zap.Logger, ml *memberlist.Memberlist) *Delegate {
 			},
 			RetransmitMult: 3,
 		},
+		state: state,
 	}
 }
 
 func (d *Delegate) NodeMeta(limit int) []byte {
+	d.logger.Info("Delegate.NodeMeta()", zap.Int("limit", limit))
 	return []byte{}
 }
 
 func (d *Delegate) NotifyMsg(b []byte) {
+	d.logger.Info("Delegate.NotifyMsg()", zap.String("b", string(b)))
+
 	if len(b) == 0 {
 		return
 	}
@@ -68,7 +73,17 @@ func (d *Delegate) NotifyMsg(b []byte) {
 }
 
 func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
-	return d.tlq.GetBroadcasts(overhead, limit)
+	broadcasts := d.tlq.GetBroadcasts(overhead, limit)
+
+	for key, val := range broadcasts {
+		d.logger.Info("Delegate.GetBroadcasts()",
+			zap.Int("overhead", overhead),
+			zap.Int("limit", limit),
+			zap.Int("key", key),
+			zap.String("b", string(val)))
+	}
+
+	return broadcasts
 }
 
 func (d *Delegate) LocalState(join bool) []byte {
@@ -85,6 +100,11 @@ func (d *Delegate) LocalState(join bool) []byte {
 }
 
 func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
+	d.logger.Info("Delegate.MergeRemoteState()",
+		zap.String("buf", string(buf)),
+		zap.Bool("join", join),
+	)
+
 	if len(buf) == 0 {
 		return
 	}
