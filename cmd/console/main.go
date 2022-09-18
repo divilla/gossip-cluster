@@ -6,8 +6,10 @@ import (
 	"github.com/gookit/gcli/v3"
 	"github.com/hashicorp/memberlist"
 	"go.uber.org/zap"
+	"log"
 	"os"
 	"os/signal"
+	"time"
 )
 
 type (
@@ -105,6 +107,7 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) func(*gcli.Command, []string) error {
 	return func(cmd *gcli.Command, args []string) error {
 		cfg := memberlist.DefaultLocalConfig()
+		cfg.Logger = log.Default()
 		parseOptions(cfg, opt)
 
 		ml, err := memberlist.Create(cfg)
@@ -113,12 +116,18 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 		}
 		cfg.Delegate = xml.NewDelegate(logger, ml)
 
-		n, err := ml.Join(args)
-		if err != nil {
-			return fmt.Errorf("failed to join the cluster: %w", err)
+		for i := 0; i < 30; i++ {
+			_, err = ml.Join(args)
+			if err != nil {
+				logger.Warn("join failed", zap.Int("attempt", i+1), zap.Int("nr", ml.NumMembers()), zap.Error(err))
+			} else {
+				break
+			}
+
+			time.Sleep(time.Second)
 		}
 
-		logger.Info("join", zap.Int("nodes", n))
+		logger.Info("join success", zap.Int("nodes", ml.NumMembers()))
 		for _, mem := range ml.Members() {
 			logger.Info("member", zap.String("dns-name", mem.String()), zap.String("address", mem.Address()))
 		}

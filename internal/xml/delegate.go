@@ -10,11 +10,11 @@ import (
 
 type (
 	Delegate struct {
-		logger     *zap.Logger
-		ml         *memberlist.Memberlist
-		broadcasts *memberlist.TransmitLimitedQueue
-		items      map[string]string
-		rwm        sync.RWMutex
+		logger *zap.Logger
+		ml     *memberlist.Memberlist
+		tlq    *memberlist.TransmitLimitedQueue
+		items  map[string]string
+		rwm    sync.RWMutex
 	}
 
 	Update struct {
@@ -27,7 +27,7 @@ func NewDelegate(logger *zap.Logger, ml *memberlist.Memberlist) *Delegate {
 	return &Delegate{
 		logger: logger,
 		items:  make(map[string]string),
-		broadcasts: &memberlist.TransmitLimitedQueue{
+		tlq: &memberlist.TransmitLimitedQueue{
 			NumNodes: func() int {
 				return ml.NumMembers()
 			},
@@ -68,7 +68,7 @@ func (d *Delegate) NotifyMsg(b []byte) {
 }
 
 func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
-	return d.broadcasts.GetBroadcasts(overhead, limit)
+	return d.tlq.GetBroadcasts(overhead, limit)
 }
 
 func (d *Delegate) LocalState(join bool) []byte {

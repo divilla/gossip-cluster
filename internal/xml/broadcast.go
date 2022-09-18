@@ -3,21 +3,21 @@ package xml
 import "github.com/hashicorp/memberlist"
 
 type (
-	broadcast struct {
+	Broadcast struct {
 		msg    []byte
 		notify chan<- struct{}
 	}
 )
 
-func (b *broadcast) Invalidates(other memberlist.Broadcast) bool {
+func (b *Broadcast) Invalidates(other memberlist.Broadcast) bool {
 	return false
 }
 
-func (b *broadcast) Message() []byte {
+func (b *Broadcast) Message() []byte {
 	return b.msg
 }
 
-func (b *broadcast) Finished() {
+func (b *Broadcast) Finished() {
 	if b.notify != nil {
 		close(b.notify)
 	}
