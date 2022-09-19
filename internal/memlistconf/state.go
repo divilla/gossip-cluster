@@ -1,5 +1,10 @@
 package memlistconf
 
+import (
+	"github.com/divilla/gossip-cluster/internal/ifsm"
+	"github.com/looplab/fsm"
+)
+
 const (
 	Starting NodeState = "starting"
 	Ready    NodeState = "ready"
@@ -8,6 +13,7 @@ const (
 type (
 	State struct {
 		name string
+		fsm  *fsm.FSM
 		sns  StateNode
 	}
 
@@ -15,12 +21,13 @@ type (
 	NodeState = string
 )
 
-func NewState(name string, ns NodeState) *State {
-	j := make(StateNode)
-	j["state"] = ns
+func NewState(name string) *State {
+	f := ifsm.New()
 
 	sns := make(StateNode)
-	sns[name] = StateNode{"state": Starting}
+	sns[name] = StateNode{
+		"state": f.Current(),
+	}
 
 	return &State{
 		name: name,

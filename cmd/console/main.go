@@ -90,7 +90,7 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 		if err != nil {
 			return fmt.Errorf("failed to create first node: %w", err)
 		}
-		state := memlistconf.NewState(ml.LocalNode().Name, memlistconf.Starting)
+		state := memlistconf.NewState(ml.LocalNode().Name)
 		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
 
 		logger.Info("start")
@@ -115,7 +115,7 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 		if err != nil {
 			return fmt.Errorf("failed to create first node: %w", err)
 		}
-		state := memlistconf.NewState(ml.LocalNode().Name, memlistconf.Starting)
+		state := memlistconf.NewState(ml.LocalNode().Name)
 		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
 
 		for i := 0; i < 30; i++ {
