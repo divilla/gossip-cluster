@@ -13,7 +13,7 @@ type (
 		logger *zap.Logger
 		ml     *memberlist.Memberlist
 		tlq    *memberlist.TransmitLimitedQueue
-		state  *State
+		state  *GlobalState
 		items  map[string]string
 		rwm    sync.RWMutex
 	}
@@ -24,7 +24,7 @@ type (
 	}
 )
 
-func NewDelegate(logger *zap.Logger, ml *memberlist.Memberlist, state *State) *Delegate {
+func NewDelegate(logger *zap.Logger, ml *memberlist.Memberlist, state *GlobalState) *Delegate {
 	return &Delegate{
 		logger: logger,
 		items:  make(map[string]string),

@@ -83,22 +83,36 @@ func makeFlags() gcli.Flags {
 
 func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) func(*gcli.Command, []string) error {
 	return func(cmd *gcli.Command, args []string) error {
-		cfg := memberlist.DefaultLocalConfig()
+		cfg := memberlist.DefaultLANConfig()
 		parseOptions(cfg, opt)
 
 		ml, err := memberlist.Create(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to create first node: %w", err)
 		}
-		state := memlistconf.NewState(ml.LocalNode().Name)
+		state := memlistconf.NewState(logger, ml.LocalNode())
 		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
 
-		logger.Info("start")
-		for _, mem := range ml.Members() {
-			logger.Info("member", zap.String("dns-name", mem.String()), zap.String("address", mem.Address()))
-		}
-		fmt.Println()
+		i := 0
+		for {
+			if ml.NumMembers() == 3 {
+				if err = state.Event(memlistconf.Assemble); err != nil {
+					return err
+				}
+				break
+			}
 
+			select {
+			case <-quitCh:
+				return err
+			case <-time.After(time.Second):
+				i++
+				logger.Warn("assemble failed", zap.Int("attempt", i+1), zap.Int("num_members", ml.NumMembers()))
+			}
+		}
+
+		logger.Info("local_node", zap.String("state", state.LocalNode()[memlistconf.State].(string)))
+		fmt.Println()
 		<-quitCh
 
 		return nil
@@ -107,7 +121,7 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 
 func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) func(*gcli.Command, []string) error {
 	return func(cmd *gcli.Command, args []string) error {
-		cfg := memberlist.DefaultLocalConfig()
+		cfg := memberlist.DefaultLANConfig()
 		cfg.Logger = log.Default()
 		parseOptions(cfg, opt)
 
@@ -115,24 +129,45 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 		if err != nil {
 			return fmt.Errorf("failed to create first node: %w", err)
 		}
-		state := memlistconf.NewState(ml.LocalNode().Name)
+		state := memlistconf.NewState(logger, ml.LocalNode())
 		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
 
 		for i := 0; i < 30; i++ {
 			if _, err = ml.Join(args); err == nil {
+				if err = state.Event(memlistconf.Join); err != nil {
+					return err
+				}
 				break
 			}
 
 			select {
 			case <-quitCh:
-				return err
+				return nil
 			case <-time.After(time.Second):
 				logger.Warn("join failed", zap.Int("attempt", i+1), zap.Int("nr", ml.NumMembers()), zap.Error(err))
 			}
 		}
 
-		fmt.Println()
+		i := 0
+		for {
+			if ml.NumMembers() == 3 {
+				if err = state.Event(memlistconf.Assemble); err != nil {
+					return err
+				}
+				break
+			}
 
+			select {
+			case <-quitCh:
+				return nil
+			case <-time.After(time.Second):
+				i++
+				logger.Warn("assemble failed", zap.Int("attempt", i+1), zap.Int("num_members", ml.NumMembers()))
+			}
+		}
+
+		logger.Info("local_node", zap.String("state", state.LocalNode()[memlistconf.State].(string)))
+		fmt.Println()
 		<-quitCh
 
 		return nil
