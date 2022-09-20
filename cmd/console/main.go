@@ -90,13 +90,16 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 		if err != nil {
 			return fmt.Errorf("failed to create first node: %w", err)
 		}
-		state := memlistconf.NewState(logger, ml.LocalNode())
-		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
+
+		tlq := memlistconf.NewTLQ(ml)
+		gs := memlistconf.NewState(logger, ml.LocalNode())
+		ms := memlistconf.NewMessenger(logger, ml, tlq)
+		cfg.Delegate = memlistconf.NewDelegate(logger, ml, tlq, gs)
 
 		i := 0
 		for {
 			if ml.NumMembers() == 3 {
-				if err = state.Event(memlistconf.Assemble); err != nil {
+				if err = gs.Event(memlistconf.Assemble); err != nil {
 					return err
 				}
 				break
@@ -111,7 +114,8 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 			}
 		}
 
-		logger.Info("local_node", zap.String("state", state.LocalNode()[memlistconf.State].(string)))
+		logger.Info("local_node", zap.String("state", gs.LocalNode()[memlistconf.State].(string)))
+		ms.Broadcast("ln", []byte("assembled"))
 		fmt.Println()
 		<-quitCh
 
@@ -127,14 +131,20 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 
 		ml, err := memberlist.Create(cfg)
 		if err != nil {
-			return fmt.Errorf("failed to create first node: %w", err)
+			return fmt.Errorf("failed to create follower node: %w", err)
 		}
-		state := memlistconf.NewState(logger, ml.LocalNode())
-		cfg.Delegate = memlistconf.NewDelegate(logger, ml, state)
 
+		tlq := memlistconf.NewTLQ(ml)
+		gs := memlistconf.NewState(logger, ml.LocalNode())
+		ms := memlistconf.NewMessenger(logger, ml, tlq)
+		cfg.Delegate = memlistconf.NewDelegate(logger, ml, tlq, gs)
+
+		if err = gs.Event(memlistconf.Join); err != nil {
+			return err
+		}
 		for i := 0; i < 30; i++ {
 			if _, err = ml.Join(args); err == nil {
-				if err = state.Event(memlistconf.Join); err != nil {
+				if err = gs.Event(memlistconf.Joined); err != nil {
 					return err
 				}
 				break
@@ -149,9 +159,12 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 		}
 
 		i := 0
+		if err = gs.Event(memlistconf.Assemble); err != nil {
+			return err
+		}
 		for {
 			if ml.NumMembers() == 3 {
-				if err = state.Event(memlistconf.Assemble); err != nil {
+				if err = gs.Event(memlistconf.Assembled); err != nil {
 					return err
 				}
 				break
@@ -166,7 +179,8 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 			}
 		}
 
-		logger.Info("local_node", zap.String("state", state.LocalNode()[memlistconf.State].(string)))
+		ms.Broadcast("join", []byte("joined"))
+		logger.Info("local_node", zap.String("state", gs.LocalNode()[memlistconf.State].(string)))
 		fmt.Println()
 		<-quitCh
 
@@ -202,7 +216,7 @@ func makeConfig(opt *options) func(*gcli.Command) {
 
 		c.StrVar(&opt.DNSName, &gcli.FlagMeta{
 			Name:     "name",
-			Desc:     "Node's dns name.",
+			Desc:     "Nodes's dns name.",
 			Shorts:   []string{"n"},
 			Required: false,
 		})
