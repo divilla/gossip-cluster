@@ -93,12 +93,20 @@ func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
 		zap.Bool("join", join),
 	)
 
-	if len(buf) == 0 {
+	if join || len(buf) == 0 {
 		return
 	}
-	if !join {
-		return
+
+	var rs Nodes
+	if err := json.Unmarshal(buf, &rs); err != nil {
+		d.logger.Error("unmarshall failed", zap.Error(err))
 	}
+
+	for key, val := range rs {
+		d.state.Merge(key, val)
+	}
+
+	d.state.LogFullState()
 
 	//d.rwm.Lock()
 	//defer d.rwm.Unlock()

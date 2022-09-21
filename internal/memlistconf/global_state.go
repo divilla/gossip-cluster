@@ -1,9 +1,11 @@
 package memlistconf
 
 import (
+	"encoding/json"
 	"github.com/hashicorp/memberlist"
 	"github.com/looplab/fsm"
 	"go.uber.org/zap"
+	"sync"
 )
 
 const (
@@ -26,6 +28,7 @@ type (
 		node   *memberlist.Node
 		fsm    *fsm.FSM
 		nodes  Nodes
+		rwm    sync.RWMutex
 	}
 
 	Nodes     = map[string]NodeData
@@ -94,6 +97,13 @@ func (s *GlobalState) LocalState() Nodes {
 	return Nodes{s.Name(): s.nodes[s.Name()]}
 }
 
+func (s *GlobalState) Merge(key string, data NodeData) {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	s.nodes[key] = data
+}
+
 func (s *GlobalState) Event(name EventName, args ...interface{}) error {
 	if err := s.fsm.Event(name, args...); err != nil {
 		return err
@@ -105,4 +115,13 @@ func (s *GlobalState) Event(name EventName, args ...interface{}) error {
 
 func (s *GlobalState) Size() int {
 	return len(s.nodes)
+}
+
+func (s *GlobalState) LogFullState() {
+	jsonState, err := json.Marshal(s.nodes)
+	if err != nil {
+		s.logger.Error("marshal failed", zap.Error(err))
+	}
+
+	s.logger.Info("state", zap.ByteString("full", jsonState))
 }

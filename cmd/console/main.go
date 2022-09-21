@@ -93,7 +93,7 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 
 		tlq := memlistconf.NewTLQ(ml)
 		gs := memlistconf.NewState(logger, ml.LocalNode())
-		ms := memlistconf.NewMessenger(logger, ml, tlq)
+		_ = memlistconf.NewMessenger(logger, ml, tlq)
 		cfg.Delegate = memlistconf.NewDelegate(logger, ml, tlq, gs)
 
 		i := 0
@@ -115,7 +115,7 @@ func makeStartCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) f
 		}
 
 		logger.Info("local_node", zap.String("state", gs.LocalNode()[memlistconf.State].(string)))
-		ms.Broadcast("ln", []byte("assembled"))
+		//ms.Broadcast("ln", []byte("assembled"))
 		fmt.Println()
 		<-quitCh
 
@@ -136,7 +136,7 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 
 		tlq := memlistconf.NewTLQ(ml)
 		gs := memlistconf.NewState(logger, ml.LocalNode())
-		ms := memlistconf.NewMessenger(logger, ml, tlq)
+		_ = memlistconf.NewMessenger(logger, ml, tlq)
 		cfg.Delegate = memlistconf.NewDelegate(logger, ml, tlq, gs)
 
 		if err = gs.Event(memlistconf.Join); err != nil {
@@ -179,7 +179,7 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 			}
 		}
 
-		ms.Broadcast("join", []byte("joined"))
+		//ms.Broadcast("join", []byte("joined"))
 		logger.Info("local_node", zap.String("state", gs.LocalNode()[memlistconf.State].(string)))
 		fmt.Println()
 		<-quitCh
@@ -189,6 +189,8 @@ func makeJoinCommand(logger *zap.Logger, opt *options, quitCh chan os.Signal) fu
 }
 
 func parseOptions(cfg *memberlist.Config, opt *options) {
+	cfg.PushPullInterval = time.Second
+
 	if opt.DNSName != "" {
 		cfg.Name = opt.DNSName
 	}
