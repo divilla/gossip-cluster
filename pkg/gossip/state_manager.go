@@ -3,6 +3,7 @@ package gossip
 import (
 	"github.com/looplab/fsm"
 	"go.uber.org/zap"
+	"math"
 	"sync"
 	"time"
 )
@@ -43,7 +44,10 @@ func (s *StateManager) SetState(state State) {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
-	s.state.Leader = state.Leader
+	if state.Timestamp.After(s.state.Timestamp) {
+		s.state.Leader = state.Leader
+	}
+
 	for key, node := range state.Nodes {
 		if key == s.localNodeID {
 			continue
@@ -59,6 +63,8 @@ func (s *StateManager) SetState(state State) {
 			continue
 		}
 	}
+
+	s.setLeader()
 }
 
 func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
@@ -68,6 +74,17 @@ func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
 
 	s.setLocalState()
 	return nil
+}
+
+func (s *StateManager) setLeader() {
+	first := uint16(math.MaxUint16)
+	for key := range s.state.Nodes {
+		if key < first {
+			first = key
+		}
+	}
+
+	s.state.Leader = first
 }
 
 func (s *StateManager) Size() int {

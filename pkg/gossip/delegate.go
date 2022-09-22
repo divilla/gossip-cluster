@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hashicorp/memberlist"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
+	"time"
 )
 
 type (
@@ -12,7 +14,7 @@ type (
 		logger *zap.Logger
 		ml     *memberlist.Memberlist
 		tlq    *memberlist.TransmitLimitedQueue
-		state  *StateManager
+		State  *StateManager
 	}
 
 	Update struct {
@@ -21,16 +23,12 @@ type (
 	}
 )
 
-func newDelegate(logger *zap.Logger, ml *memberlist.Memberlist, state *StateManager) *Delegate {
+func newDelegate(logger *zap.Logger, ml *memberlist.Memberlist, tlq *memberlist.TransmitLimitedQueue, state *StateManager) *Delegate {
 	return &Delegate{
 		logger: logger,
-		tlq: &memberlist.TransmitLimitedQueue{
-			NumNodes: func() int {
-				return ml.NumMembers()
-			},
-			RetransmitMult: 3,
-		},
-		state: state,
+		ml:     ml,
+		tlq:    tlq,
+		State:  state,
 	}
 }
 
@@ -52,12 +50,18 @@ func (d *Delegate) NotifyMsg(b []byte) {
 func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
 	broadcasts := d.tlq.GetBroadcasts(overhead, limit)
 
-	for key, val := range broadcasts {
-		d.logger.Info("Delegate.GetBroadcasts()",
-			zap.Int("overhead", overhead),
-			zap.Int("limit", limit),
-			zap.Int("key", key),
-			zap.String("b", string(val)))
+	for _, data := range broadcasts {
+		fmt.Println(string(data))
+		method := gjson.GetBytes(data, "method").String()
+		switch method {
+		case "select_leader":
+			var slm SelectLeaderMessage
+			if err := json.Unmarshal(data, &slm); err != nil {
+				panic(err)
+			}
+			d.State.state.Leader = slm.Args.Leader
+			d.State.state.Timestamp = time.Now().UTC()
+		}
 	}
 
 	return broadcasts
@@ -69,7 +73,7 @@ func (d *Delegate) LocalState(join bool) []byte {
 		return nil
 	}
 
-	b, _ := json.Marshal(d.state.GetState())
+	b, _ := json.Marshal(d.State.GetState())
 	return b
 }
 
@@ -91,5 +95,5 @@ func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
 		panic(err)
 	}
 
-	d.state.SetState(state)
+	d.State.SetState(state)
 }

@@ -19,13 +19,14 @@ const (
 
 type (
 	State struct {
-		Leader uint16               `json:"leader"`
-		Nodes  map[uint16]NodeState `json:"nodes"`
+		Leader    uint16               `json:"leader"`
+		Timestamp time.Time            `json:"timestamp"`
+		Nodes     map[uint16]NodeState `json:"nodes"`
 	}
 
 	NodeState struct {
 		Name      string    `json:"name"`
-		State     StateName `json:"state"`
+		State     StateName `json:"State"`
 		Timestamp time.Time `json:"timestamp"`
 	}
 

@@ -8,13 +8,23 @@ import (
 type (
 	Broadcast struct {
 		memberlist.NamedBroadcast
-		logger *zap.Logger
-		ml     *memberlist.Memberlist
-		name   string
-		msg    []byte
-		notify chan<- struct{}
+		logger   *zap.Logger
+		ml       *memberlist.Memberlist
+		name     string
+		msg      []byte
+		notifyCh chan<- struct{}
 	}
 )
+
+func NewBroadcast(logger *zap.Logger, ml *memberlist.Memberlist, name string, msg []byte, notifyCh chan<- struct{}) *Broadcast {
+	return &Broadcast{
+		logger:   logger,
+		ml:       ml,
+		name:     name,
+		msg:      msg,
+		notifyCh: notifyCh,
+	}
+}
 
 func (b *Broadcast) Invalidates(other memberlist.Broadcast) bool {
 	b.logger.Info("Broadcast.Invalidates()", zap.String("other", string(other.Message())))
@@ -33,8 +43,8 @@ func (b *Broadcast) Message() []byte {
 
 func (b *Broadcast) Finished() {
 	b.logger.Info("Broadcast.Finished()")
-	if b.notify != nil {
-		close(b.notify)
+	if b.notifyCh != nil {
+		close(b.notifyCh)
 	}
 }
 

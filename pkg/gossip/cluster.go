@@ -12,6 +12,7 @@ type (
 		Config     *Config
 		Memberlist *memberlist.Memberlist
 		State      *StateManager
+		Messenger  *Messenger
 		logger     *zap.Logger
 		stopCh     <-chan struct{}
 	}
@@ -37,7 +38,9 @@ func (c *Cluster) init() {
 		panic(fmt.Errorf("memberlist.Create() error: %w", err))
 	}
 	c.State = newStateManager(c.logger, c.Config.ServerID, c.Memberlist.LocalNode().Name)
-	mlc.Delegate = newDelegate(c.logger, c.Memberlist, c.State)
+	tlq := newTlq(c.Memberlist)
+	mlc.Delegate = newDelegate(c.logger, c.Memberlist, tlq, c.State)
+	c.Messenger = newMessenger(c.logger, c.Memberlist, tlq)
 
 	if len(c.Config.JoinNodes) > 0 {
 		if err = c.State.Trigger(Join); err != nil {
@@ -94,7 +97,8 @@ func (c *Cluster) assemble() error {
 			return fmt.Errorf("gossip.Cluster.assemble() timeout: %d s", c.Config.AssembleTimeoutS)
 		}
 
-		if c.Memberlist.NumMembers() == c.Config.JoinNodesNum {
+		if c.Memberlist.NumMembers() >= c.Config.JoinNodesNum &&
+			c.State.Size() >= c.Config.JoinNodesNum {
 			return nil
 		}
 
@@ -137,4 +141,13 @@ func newMemberListConfig(c *Config) *memberlist.Config {
 	}
 
 	return mlc
+}
+
+func newTlq(ml *memberlist.Memberlist) *memberlist.TransmitLimitedQueue {
+	return &memberlist.TransmitLimitedQueue{
+		NumNodes: func() int {
+			return ml.NumMembers()
+		},
+		RetransmitMult: 3,
+	}
 }
