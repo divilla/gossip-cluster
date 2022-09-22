@@ -12,7 +12,7 @@ type (
 		logger *zap.Logger
 		ml     *memberlist.Memberlist
 		tlq    *memberlist.TransmitLimitedQueue
-		state  *ClusterState
+		state  *StateManager
 	}
 
 	Update struct {
@@ -21,7 +21,7 @@ type (
 	}
 )
 
-func newDelegate(logger *zap.Logger, ml *memberlist.Memberlist, state *ClusterState) *Delegate {
+func newDelegate(logger *zap.Logger, ml *memberlist.Memberlist, state *StateManager) *Delegate {
 	return &Delegate{
 		logger: logger,
 		tlq: &memberlist.TransmitLimitedQueue{
@@ -86,7 +86,7 @@ func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
 		return
 	}
 
-	var state map[string]NodeState
+	var state State
 	if err := json.Unmarshal(buf, &state); err != nil {
 		panic(err)
 	}

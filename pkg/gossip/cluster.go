@@ -11,7 +11,7 @@ type (
 	Cluster struct {
 		Config     *Config
 		Memberlist *memberlist.Memberlist
-		State      *ClusterState
+		State      *StateManager
 		logger     *zap.Logger
 		stopCh     <-chan struct{}
 	}
@@ -36,7 +36,7 @@ func (c *Cluster) init() {
 	if c.Memberlist, err = memberlist.Create(mlc); err != nil {
 		panic(fmt.Errorf("memberlist.Create() error: %w", err))
 	}
-	c.State = newClusterState(c.logger, c.Memberlist.LocalNode().Name)
+	c.State = newStateManager(c.logger, c.Config.ServerID, c.Memberlist.LocalNode().Name)
 	mlc.Delegate = newDelegate(c.logger, c.Memberlist, c.State)
 
 	if len(c.Config.JoinNodes) > 0 {
@@ -110,10 +110,7 @@ func (c *Cluster) assemble() error {
 func newMemberListConfig(c *Config) *memberlist.Config {
 	mlc := memberlist.DefaultLANConfig()
 	mlc.Logger = nil
-
-	if c.Name != "" {
-		mlc.Name = c.Name
-	}
+	mlc.Name = fmt.Sprintf("%06d-%s", c.ServerID, mlc.Name)
 
 	if c.BindAddr != "" {
 		mlc.BindAddr = c.BindAddr

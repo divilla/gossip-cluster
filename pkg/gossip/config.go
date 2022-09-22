@@ -8,7 +8,7 @@ const (
 
 type (
 	Config struct {
-		Name               string `yaml:"name"`
+		ServerID           uint16 `yaml:"server_id"`
 		BindAddr           string `yaml:"bind_addr"`
 		BindPort           int    `yaml:"bind_port"`
 		AdvertiseAddr      string `yaml:"advertise_addr"`
