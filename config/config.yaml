@@ -1,0 +1,28 @@
+nodes:
+  -
+    leader: true
+    name: leader
+    bind_addr: 127.0.0.1
+    bind_port: 8081
+    push_pull_interval_ms: 1000
+    join_nodes_num: 3
+  #    join_timeout_s: 10
+  #    assemble_timeout_s: 30
+  -
+    leader: false
+    name: node-1
+    bind_addr: 127.0.0.1
+    bind_port: 8082
+    push_pull_interval_ms: 1000
+    join_nodes_num: 3
+    join_nodes:
+      - 127.0.0.1:8081
+  -
+    leader: false
+    name: node-2
+    bind_addr: 127.0.0.1
+    bind_port: 8083
+    push_pull_interval_ms: 1000
+    join_nodes_num: 3
+    join_nodes:
+      - 127.0.0.1:8081

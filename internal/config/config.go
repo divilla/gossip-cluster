@@ -3,34 +3,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/divilla/gossip-cluster/pkg/gossip"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
 	"os"
 )
 
 type Config struct {
-	ClearDB               bool     `yaml:"clear_db"`
-	ReportAfter           int      `yaml:"report_after"`
-	TotalWorkers          int      `yaml:"total_workers"`
-	OperationsTimeout     int64    `yaml:"operations_timeout"`
-	ExcludeTables         []string `yaml:"exclude_tables"`
-	SeedRows              int      `yaml:"seed_rows"`
-	InsertSkipNullableOdd int64    `yaml:"insert_skip_nullable_odd"`
-	UpdateFieldOdd        int64    `yaml:"update_field_odd"`
-	AlwaysUpdate          []string `yaml:"always_update"`
-	SkipFields            []string `yaml:"skip_fields"`
-
-	DSNList []struct {
-		Name string `yaml:"name"`
-		URL  string `yaml:"url"`
-	} `yaml:"dsn_list"`
-
-	CommandOdds struct {
-		Insert uint64 `yaml:"insert"`
-		Update uint64 `yaml:"update"`
-		Delete uint64 `yaml:"delete"`
-	} `yaml:"command_odds"`
-	TotalCommandOdds uint64
+	Nodes []*gossip.Config
 }
 
 func New(paths ...string) (*Config, error) {
@@ -50,8 +30,6 @@ func New(paths ...string) (*Config, error) {
 		if err = yaml.Unmarshal(file, cfg); err != nil {
 			return nil, fmt.Errorf("yaml.Unmarshal() %w", err)
 		}
-
-		cfg.TotalCommandOdds = cfg.CommandOdds.Insert + cfg.CommandOdds.Update + cfg.CommandOdds.Delete
 
 		return cfg, nil
 	}
