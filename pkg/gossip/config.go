@@ -4,6 +4,7 @@ const (
 	defaultMinNodesNum      = 3
 	defaultJoinTimeoutS     = 10
 	defaultAssembleTimeoutS = 30
+	defaultElectLeaderS     = 30
 )
 
 type (
@@ -19,6 +20,7 @@ type (
 		JoinNodesNum     int      `yaml:"join_nodes_num"`
 		JoinTimeoutS     int      `yaml:"join_timeout_s"`
 		AssembleTimeoutS int      `yaml:"assemble_timeout_s"`
+		ElectLeaderS     int      `yaml:"elect_leader_s"`
 	}
 )
 
@@ -33,6 +35,10 @@ func parseDefaults(c *Config) *Config {
 
 	if c.AssembleTimeoutS == 0 {
 		c.AssembleTimeoutS = defaultAssembleTimeoutS
+	}
+
+	if c.ElectLeaderS == 0 {
+		c.ElectLeaderS = defaultElectLeaderS
 	}
 
 	return c

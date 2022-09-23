@@ -20,13 +20,16 @@ type (
 )
 
 func newStateManager(logger *zap.Logger, localNodeID uint16, localNodeName string) *StateManager {
-	cs := &StateManager{
+	sm := &StateManager{
 		logger:        logger,
 		localNodeID:   localNodeID,
 		localNodeName: localNodeName,
 	}
 
-	return cs.init()
+	sm.fsm = newFSM(sm)
+	sm.state = newState(localNodeID, localNodeName, sm.fsm.Current())
+
+	return sm
 }
 
 func (s *StateManager) LocalNodeID() uint16 {
@@ -44,10 +47,6 @@ func (s *StateManager) SetState(state State) {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
-	if state.Timestamp.After(s.state.Timestamp) {
-		s.state.Leader = state.Leader
-	}
-
 	for key, node := range state.Nodes {
 		if key == s.localNodeID {
 			continue
@@ -64,7 +63,7 @@ func (s *StateManager) SetState(state State) {
 		}
 	}
 
-	s.setLeader()
+	//s.ElectLeader()
 }
 
 func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
@@ -76,7 +75,11 @@ func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
 	return nil
 }
 
-func (s *StateManager) setLeader() {
+func (s *StateManager) ElectLeader() bool {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	// choose node with the smallest Config.ServerID
 	first := uint16(math.MaxUint16)
 	for key := range s.state.Nodes {
 		if key < first {
@@ -84,10 +87,27 @@ func (s *StateManager) setLeader() {
 		}
 	}
 
-	s.state.Leader = first
+	// set the node as the leader, if not already
+	if s.state.Nodes[s.localNodeID].Leader != first {
+		ns := s.state.Nodes[s.localNodeID]
+		ns.Leader = first
+		s.state.Nodes[s.localNodeID] = ns
+	}
+
+	// check for 100% quorum
+	for _, ns := range s.state.Nodes {
+		if ns.Leader != first {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s *StateManager) Size() int {
+	s.rwm.RLock()
+	defer s.rwm.RUnlock()
+
 	return len(s.state.Nodes)
 }
 
@@ -100,44 +120,4 @@ func (s *StateManager) setLocalState() {
 	ns.Timestamp = time.Now().UTC()
 
 	s.state.Nodes[s.localNodeID] = ns
-}
-
-func (s *StateManager) init() *StateManager {
-	s.fsm = fsm.NewFSM(
-		Starting,
-		fsm.Events{
-			{Name: Join, Src: []string{Starting}, Dst: Joining},
-			{Name: Joined, Src: []string{Joining}, Dst: Starting},
-			{Name: Assemble, Src: []string{Starting}, Dst: Assembling},
-			{Name: Assembled, Src: []string{Assembling}, Dst: Idle},
-			{Name: Finish, Src: []string{Assembling}, Dst: Idle},
-		},
-		fsm.Callbacks{
-			Join: func(e *fsm.Event) {
-				s.logger.Info("event",
-					zap.String("name", e.Event),
-					zap.String("src", e.Src),
-					zap.String("dst", e.Dst),
-				)
-			},
-			Assemble: func(e *fsm.Event) {
-				s.logger.Info("event",
-					zap.String("name", e.Event),
-					zap.String("src", e.Src),
-					zap.String("dst", e.Dst),
-				)
-			},
-			Finish: func(e *fsm.Event) {
-				s.logger.Info("event",
-					zap.String("name", e.Event),
-					zap.String("src", e.Src),
-					zap.String("dst", e.Dst),
-				)
-			},
-		},
-	)
-
-	s.state = newState(s.localNodeID, s.localNodeName, s.fsm.Current())
-
-	return s
 }

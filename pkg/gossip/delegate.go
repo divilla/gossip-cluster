@@ -6,7 +6,6 @@ import (
 	"github.com/hashicorp/memberlist"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
-	"time"
 )
 
 type (
@@ -59,8 +58,6 @@ func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
 			if err := json.Unmarshal(data, &slm); err != nil {
 				panic(err)
 			}
-			d.State.state.Leader = slm.Args.Leader
-			d.State.state.Timestamp = time.Now().UTC()
 		}
 	}
 
