@@ -51,39 +51,27 @@ func newState(localNodeID uint16, localNodeName string, localNodeState StateName
 }
 
 func newFSM(sm *StateManager) *fsm.FSM {
-	return fsm.NewFSM(
-		Starting,
-		fsm.Events{
-			{Name: Join, Src: []string{Starting}, Dst: Joining},
-			{Name: Joined, Src: []string{Joining}, Dst: Starting},
-			{Name: Assemble, Src: []string{Starting}, Dst: Assembling},
-			{Name: Assembled, Src: []string{Assembling}, Dst: Idle},
-			{Name: Elect, Src: []string{Idle}, Dst: Electing},
-			{Name: Elected, Src: []string{Electing}, Dst: Idle},
-			{Name: Finish, Src: []string{Assembling}, Dst: Idle},
-		},
-		fsm.Callbacks{
-			Join: func(e *fsm.Event) {
-				sm.logger.Info("event",
-					zap.String("name", e.Event),
-					zap.String("src", e.Src),
-					zap.String("dst", e.Dst),
-				)
-			},
-			Assemble: func(e *fsm.Event) {
-				sm.logger.Info("event",
-					zap.String("name", e.Event),
-					zap.String("src", e.Src),
-					zap.String("dst", e.Dst),
-				)
-			},
-			Finish: func(e *fsm.Event) {
-				sm.logger.Info("event",
-					zap.String("name", e.Event),
-					zap.String("src", e.Src),
-					zap.String("dst", e.Dst),
-				)
-			},
-		},
-	)
+	events := fsm.Events{
+		{Name: Join, Src: []string{Starting}, Dst: Joining},
+		{Name: Joined, Src: []string{Joining}, Dst: Starting},
+		{Name: Assemble, Src: []string{Starting}, Dst: Assembling},
+		{Name: Assembled, Src: []string{Assembling}, Dst: Idle},
+		{Name: Elect, Src: []string{Idle}, Dst: Electing},
+		{Name: Elected, Src: []string{Electing}, Dst: Idle},
+		{Name: Finish, Src: []string{Assembling}, Dst: Idle},
+	}
+
+	callbacks := make(fsm.Callbacks, len(events))
+	for _, event := range events {
+		callbacks[event.Name] = func(e *fsm.Event) {
+			sm.logger.Info("event",
+				zap.String("node", sm.localNodeName),
+				zap.String("name", e.Event),
+				zap.String("src", e.Src),
+				zap.String("dst", e.Dst),
+			)
+		}
+	}
+
+	return fsm.NewFSM(Starting, events, callbacks)
 }
