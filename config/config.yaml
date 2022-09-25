@@ -7,6 +7,7 @@ nodes:
     join_nodes_num: 3
   #    join_timeout_s: 10
   #    assemble_timeout_s: 30
+    assemble_timeout_s: 300
     debug: true
 
   -
@@ -17,7 +18,7 @@ nodes:
     join_nodes_num: 3
     join_nodes:
       - 127.0.0.1:8081
-      - 127.0.0.1:8083
+    assemble_timeout_s: 300
     debug: true
 
   -
@@ -28,5 +29,5 @@ nodes:
     join_nodes_num: 3
     join_nodes:
       - 127.0.0.1:8081
-      - 127.0.0.1:8082
+    assemble_timeout_s: 300
     debug: true

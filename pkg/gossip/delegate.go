@@ -48,8 +48,10 @@ func newDelegate(debug bool,
 // the given byte size. This metadata is available in the Node structure.
 func (d *Delegate) NodeMeta(limit int) []byte {
 	d.logger.Info("gossip.Delegate.NodeMeta()",
+		zap.String("localNode.Name", d.State.localNodeName),
 		zap.Int("limit", limit),
-		zap.ByteString("returns", d.nmb))
+		zap.ByteString("returns", d.nmb),
+	)
 
 	return d.nmb
 }
@@ -98,13 +100,19 @@ func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
 // boolean indicates this is for a join instead of a push/pull.
 func (d *Delegate) LocalState(join bool) []byte {
 	if join {
-		d.logger.Info("gossip.Delegate.LocalState", zap.String("node", d.State.localNodeName), zap.Bool("join", true))
+		//d.logger.Info("gossip.Delegate.LocalState()",
+		//	zap.String("localNode.Name", d.State.localNodeName),
+		//	zap.Bool("join", true))
 		return nil
 	}
 
-	b, _ := json.Marshal(d.State.GetNodes())
-	d.logger.Info("gossip.Delegate.LocalState", zap.String("node", d.State.localNodeName), zap.ByteString("join", b))
-	return b
+	jsonBytes, _ := json.Marshal(d.State.LocalNodeState())
+	//d.logger.Info("gossip.Delegate.LocalState()",
+	//	zap.String("localNode.Name", d.State.localNodeName),
+	//	zap.ByteString("returns", jsonBytes),
+	//)
+
+	return jsonBytes
 }
 
 // MergeRemoteState is invoked after a TCP Push/Pull. This is the
@@ -112,11 +120,11 @@ func (d *Delegate) LocalState(join bool) []byte {
 // remote side's LocalState call. The 'join'
 // boolean indicates this is for a join instead of a push/pull.
 func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
-	d.logger.Info("Delegate.MergeRemoteState()",
-		zap.String("name", d.State.localNodeName),
-		zap.String("buf", string(buf)),
-		zap.Bool("join", join),
-	)
+	//d.logger.Info("Delegate.MergeRemoteState()",
+	//	zap.String("name", d.State.localNodeName),
+	//	zap.String("buf", string(buf)),
+	//	zap.Bool("join", join),
+	//)
 
 	if join || len(buf) == 0 {
 		return

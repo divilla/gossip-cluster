@@ -61,11 +61,16 @@ func (s *StateManager) RemoveNode(id uint16) bool {
 	return true
 }
 
-func (s *StateManager) GetNodes() map[uint16]NodeState {
+func (s *StateManager) LocalNodeState() map[uint16]NodeState {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
 
-	return s.state.Nodes
+	ns := s.state.Nodes[s.localNodeID]
+	mns := map[uint16]NodeState{
+		s.localNodeID: ns,
+	}
+
+	return mns
 }
 
 func (s *StateManager) ImportState(state map[uint16]NodeState) {
@@ -156,44 +161,44 @@ func (s *StateManager) ElectLeader() bool {
 	return i <= 1
 }
 
-func (s *StateManager) CompareNodesDef() bool {
-	s.rwm.RLock()
-	defer s.rwm.RUnlock()
-
-	for nd := range s.state.nodesDef {
-		if _, ok := s.state.Nodes[nd]; !ok {
-			return false
-		}
-	}
-
-	return len(s.state.nodesDef) == len(s.state.Nodes)
-}
-
-func (s *StateManager) MakeNodesDef(nds []uint16) {
-	s.rwm.Lock()
-	defer s.rwm.Unlock()
-
-	s.state.nodesDef = make(map[uint16]struct{})
-	for _, nd := range nds {
-		s.state.nodesDef[nd] = struct{}{}
-	}
-}
-
-func (s *StateManager) SetNodesDef(nd uint16) {
-	s.rwm.Lock()
-	defer s.rwm.Unlock()
-
-	s.state.nodesDef[nd] = struct{}{}
-}
-
-func (s *StateManager) UnsetNodesDef(nd uint16) {
-	s.rwm.Lock()
-	defer s.rwm.Unlock()
-
-	if _, ok := s.state.nodesDef[nd]; ok {
-		delete(s.state.nodesDef, nd)
-	}
-}
+//func (s *StateManager) CompareNodesDef() bool {
+//	s.rwm.RLock()
+//	defer s.rwm.RUnlock()
+//
+//	for nd := range s.state.nodesDef {
+//		if _, ok := s.state.Nodes[nd]; !ok {
+//			return false
+//		}
+//	}
+//
+//	return len(s.state.nodesDef) == len(s.state.Nodes)
+//}
+//
+//func (s *StateManager) MakeNodesDef(nds []uint16) {
+//	s.rwm.Lock()
+//	defer s.rwm.Unlock()
+//
+//	s.state.nodesDef = make(map[uint16]struct{})
+//	for _, nd := range nds {
+//		s.state.nodesDef[nd] = struct{}{}
+//	}
+//}
+//
+//func (s *StateManager) SetNodesDef(nd uint16) {
+//	s.rwm.Lock()
+//	defer s.rwm.Unlock()
+//
+//	s.state.nodesDef[nd] = struct{}{}
+//}
+//
+//func (s *StateManager) UnsetNodesDef(nd uint16) {
+//	s.rwm.Lock()
+//	defer s.rwm.Unlock()
+//
+//	if _, ok := s.state.nodesDef[nd]; ok {
+//		delete(s.state.nodesDef, nd)
+//	}
+//}
 
 func (s *StateManager) Size() int {
 	s.rwm.RLock()

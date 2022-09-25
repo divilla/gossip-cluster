@@ -59,7 +59,9 @@ func newState(localNodeID uint16, localNodeName string, localNodeState StateName
 				Timestamp: time.Now().UTC(),
 			},
 		},
-		nodesDef: make(map[uint16]struct{}),
+		nodesDef: map[uint16]struct{}{
+			localNodeID: {},
+		},
 	}
 }
 
@@ -67,7 +69,7 @@ func newFSM(sm *StateManager) *fsm.FSM {
 	events := fsm.Events{
 		{Name: Join, Src: []string{Starting}, Dst: Joining},
 		{Name: Joined, Src: []string{Joining}, Dst: Idle},
-		{Name: Assemble, Src: []string{Idle}, Dst: Assembling},
+		{Name: Assemble, Src: []string{Idle, Configuring}, Dst: Assembling},
 		{Name: Assembled, Src: []string{Assembling}, Dst: Configuring},
 		{Name: Elect, Src: []string{Configuring}, Dst: Electing},
 		{Name: Elected, Src: []string{Electing}, Dst: Idle},
