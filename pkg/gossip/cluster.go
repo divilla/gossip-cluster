@@ -197,8 +197,7 @@ func (c *Cluster) electLeader(ctx context.Context, finishCh chan struct{}) {
 				c.logger.Fatal("gossip.Cluster.electLeader(), trigger event Elected", zap.Error(err))
 			}
 
-			finishCh <- struct{}{}
-			return
+			break
 		}
 
 		select {
@@ -206,6 +205,28 @@ func (c *Cluster) electLeader(ctx context.Context, finishCh chan struct{}) {
 			c.logger.Error("gossip.Cluster.electLeader(), context canceled", zap.Error(ctx.Err()))
 		case <-time.After(time.Second):
 		}
+	}
+
+	c.assignWorkers(ctx, finishCh)
+}
+
+func (c *Cluster) assignWorkers(ctx context.Context, finishCh chan struct{}) {
+	var err error
+
+	if err = c.State.Trigger(Assign); err != nil {
+		c.logger.Fatal("gossip.Cluster.assignWorkers(), trigger event Assign", zap.Error(err))
+	}
+
+	c.State.AssignWorkers()
+
+	if err = c.State.Trigger(Assigned); err != nil {
+		c.logger.Fatal("gossip.Cluster.assignWorkers(), trigger event Assigned", zap.Error(err))
+	}
+
+	select {
+	case <-ctx.Done():
+		c.logger.Error("gossip.Cluster.electLeader(), context canceled", zap.Error(ctx.Err()))
+	case finishCh <- struct{}{}:
 	}
 }
 

@@ -156,6 +156,38 @@ func (s *StateManager) ElectLeader() bool {
 	return true
 }
 
+func (s *StateManager) AssignWorkers() {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	var workers []Worker
+	l := len(s.state.Nodes)
+	for key, worker := range Workers {
+		if key%l == int(s.localNodeID)-1 {
+			workers = append(workers, worker)
+		}
+	}
+
+	if len(workers) > 0 {
+		ns := s.state.Nodes[s.localNodeID]
+		ns.Workers = workers
+		ns.Assigned = true
+		ns.Timestamp = time.Now().UTC()
+		s.state.Nodes[s.localNodeID] = ns
+	}
+}
+
+func (s *StateManager) ReleaseWorkers() {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	ns := s.state.Nodes[s.localNodeID]
+	ns.Workers = nil
+	ns.Assigned = false
+	ns.Timestamp = time.Now().UTC()
+	s.state.Nodes[s.localNodeID] = ns
+}
+
 func (s *StateManager) Size() int {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()

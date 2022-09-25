@@ -30,7 +30,17 @@ const (
 	Stop      EventName = "stop"
 	Stopped   EventName = "stopped"
 	Finish    EventName = "finish"
+
+	PlDb Worker = "pl_db"
+	UaDb Worker = "ua_db"
+	RoDb Worker = "ro_db"
+	KzDb Worker = "kz_db"
+	PtDb Worker = "pt_db"
+	BgDb Worker = "bg_db"
+	UzDb Worker = "uz_db"
 )
+
+var Workers = []Worker{PlDb, UaDb, RoDb, KzDb, PtDb, BgDb, UzDb}
 
 type (
 	State struct {
@@ -42,11 +52,14 @@ type (
 		Name      string    `json:"name"`
 		State     StateName `json:"state"`
 		Leader    uint16    `json:"leader"`
+		Workers   []Worker  `json:"workers"`
+		Assigned  bool      `json:"assigned"`
 		Timestamp time.Time `json:"timestamp"`
 	}
 
 	StateName = string
 	EventName = string
+	Worker    = string
 )
 
 func newState(localNodeID uint16, localNodeName string, localNodeState StateName) *State {
@@ -71,7 +84,7 @@ func newFSM(sm *StateManager) *fsm.FSM {
 		{Name: Assemble, Src: []string{Idle, Configuring}, Dst: Assembling},
 		{Name: Assembled, Src: []string{Assembling}, Dst: Configuring},
 		{Name: Elect, Src: []string{Configuring}, Dst: Electing},
-		{Name: Elected, Src: []string{Electing}, Dst: Idle},
+		{Name: Elected, Src: []string{Electing}, Dst: Configuring},
 		{Name: Assign, Src: []string{Configuring}, Dst: Assigning},
 		{Name: Assigned, Src: []string{Assigning}, Dst: Idle},
 		{Name: Start, Src: []string{Idle}, Dst: Starting},
