@@ -14,17 +14,15 @@ type (
 	EventDelegate struct {
 		debug   bool
 		logger  *zap.Logger
-		joinCh  chan uint16
-		leaveCh chan uint16
+		cluster *Cluster
 	}
 )
 
-func NewEventDelegate(debug bool, logger *zap.Logger, joinCh chan uint16, leaveCh chan uint16) *EventDelegate {
+func newEventDelegate(debug bool, logger *zap.Logger, cluster *Cluster) *EventDelegate {
 	return &EventDelegate{
 		debug:   debug,
 		logger:  logger,
-		joinCh:  joinCh,
-		leaveCh: leaveCh,
+		cluster: cluster,
 	}
 }
 
@@ -36,16 +34,24 @@ func NewEventDelegate(debug bool, logger *zap.Logger, joinCh chan uint16, leaveC
 // - distribute load
 // - start workers
 func (d *EventDelegate) NotifyJoin(node *memberlist.Node) {
+	if d.cluster.State.localNodeName == node.Name {
+		return
+	}
+
 	if d.debug {
-		d.logger.Debug("event_delegate", zap.String("node_name", node.Name))
+		d.logger.Debug("gossip.EventDelegate.NotifyJoin()",
+			zap.String("localNodeName", d.cluster.State.localNodeName),
+			zap.String("node.Name", node.Name))
 	}
 
 	var nodeMeta NodeMeta
 	if err := json.Unmarshal(node.Meta, &nodeMeta); err != nil {
-		panic(err)
+		d.logger.Fatal("gossip.NotifyJoin() json.Unmarshal()",
+			zap.String("node.Name", node.Name),
+			zap.ByteString("node.Meta", node.Meta))
 	}
 
-	d.joinCh <- nodeMeta.NodeID
+	d.cluster.joinCh <- nodeMeta.NodeID
 }
 
 // NotifyLeave is invoked when a node is detected to have left.
@@ -60,7 +66,7 @@ func (d *EventDelegate) NotifyLeave(node *memberlist.Node) {
 		panic(err)
 	}
 
-	d.leaveCh <- nodeMeta.NodeID
+	d.cluster.leaveCh <- nodeMeta.NodeID
 }
 
 // NotifyUpdate is invoked when a node is detected to have

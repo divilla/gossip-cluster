@@ -27,7 +27,7 @@ func newStateManager(logger *zap.Logger, localNodeID uint16, localNodeName strin
 	}
 
 	sm.fsm = newFSM(sm)
-	sm.state = newState(localNodeID, localNodeName, sm.fsm.Current(), active)
+	sm.state = newState(localNodeID, localNodeName, sm.fsm.Current())
 
 	return sm
 }
@@ -40,12 +40,12 @@ func (s *StateManager) IsLocalNode(key uint16) bool {
 	return s.localNodeID == key
 }
 
-func (s *StateManager) HasActiveNode(key uint16) bool {
+func (s *StateManager) HasNode(key uint16) bool {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
 
-	node, ok := s.state.Nodes[key]
-	return node.Active && ok
+	_, ok := s.state.Nodes[key]
+	return ok
 }
 
 func (s *StateManager) RemoveNode(id uint16) bool {
@@ -68,18 +68,11 @@ func (s *StateManager) GetNodes() map[uint16]NodeState {
 	return s.state.Nodes
 }
 
-func (s *StateManager) SetState(state map[uint16]NodeState) {
+func (s *StateManager) ImportState(state map[uint16]NodeState) {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
 	for key, node := range state {
-		if key == s.localNodeID && !node.Active {
-			node.Active = true
-			node.Timestamp = time.Now().UTC()
-			s.state.Nodes[key] = node
-			continue
-		}
-
 		if key == s.localNodeID {
 			continue
 		}
@@ -96,7 +89,7 @@ func (s *StateManager) SetState(state map[uint16]NodeState) {
 	}
 }
 
-func (s *StateManager) Current() string {
+func (s *StateManager) CurrentState() string {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
 
@@ -112,6 +105,11 @@ func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
 	return nil
 }
 
+func (s *StateManager) SetState(name StateName) {
+	s.fsm.SetState(name)
+	s.setLocalState()
+}
+
 func (s *StateManager) IsLeader() bool {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
@@ -119,16 +117,23 @@ func (s *StateManager) IsLeader() bool {
 	return s.state.Nodes[s.localNodeID].Leader == s.localNodeID
 }
 
+// ElectLeader sets leader for LocalNode & returns true when 100% quorum is achieved
 func (s *StateManager) ElectLeader() bool {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
 	// choose node with the smallest Config.NodeID
+	i := 0
 	first := uint16(math.MaxUint16)
 	for key := range s.state.Nodes {
 		if key < first {
 			first = key
+			i++
 		}
+	}
+
+	if i <= 1 {
+		return true
 	}
 
 	// set the node as the leader, if not already
@@ -136,16 +141,58 @@ func (s *StateManager) ElectLeader() bool {
 		ns := s.state.Nodes[s.localNodeID]
 		ns.Leader = first
 		s.state.Nodes[s.localNodeID] = ns
+	} else {
+		return false
 	}
 
-	// check for 100% quorum
-	for _, ns := range s.state.Nodes {
-		if ns.Leader != first {
+	i = 0
+	for key := range s.state.Nodes {
+		if key < first {
+			first = key
+			i++
+		}
+	}
+
+	return i <= 1
+}
+
+func (s *StateManager) CompareNodesDef() bool {
+	s.rwm.RLock()
+	defer s.rwm.RUnlock()
+
+	for nd := range s.state.nodesDef {
+		if _, ok := s.state.Nodes[nd]; !ok {
 			return false
 		}
 	}
 
-	return true
+	return len(s.state.nodesDef) == len(s.state.Nodes)
+}
+
+func (s *StateManager) MakeNodesDef(nds []uint16) {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	s.state.nodesDef = make(map[uint16]struct{})
+	for _, nd := range nds {
+		s.state.nodesDef[nd] = struct{}{}
+	}
+}
+
+func (s *StateManager) SetNodesDef(nd uint16) {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	s.state.nodesDef[nd] = struct{}{}
+}
+
+func (s *StateManager) UnsetNodesDef(nd uint16) {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	if _, ok := s.state.nodesDef[nd]; ok {
+		delete(s.state.nodesDef, nd)
+	}
 }
 
 func (s *StateManager) Size() int {

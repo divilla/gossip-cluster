@@ -12,8 +12,9 @@ type (
 	Delegate struct {
 		debug  bool
 		logger *zap.Logger
-		ml     *memberlist.Memberlist
 		tlq    *memberlist.TransmitLimitedQueue
+		nm     *NodeMeta
+		nmb    []byte
 		State  *StateManager
 	}
 
@@ -23,22 +24,34 @@ type (
 	}
 )
 
-func newDelegate(debug bool, logger *zap.Logger, ml *memberlist.Memberlist, tlq *memberlist.TransmitLimitedQueue, state *StateManager) *Delegate {
-	return &Delegate{
+func newDelegate(debug bool,
+	logger *zap.Logger,
+	tlq *memberlist.TransmitLimitedQueue,
+	nm *NodeMeta,
+	sm *StateManager,
+) (*Delegate, error) {
+	d := &Delegate{
 		debug:  debug,
 		logger: logger,
-		ml:     ml,
 		tlq:    tlq,
-		State:  state,
+		State:  sm,
 	}
+	if err := d.setNodeMeta(nm); err != nil {
+		return nil, err
+	}
+
+	return d, nil
 }
 
 // NodeMeta is used to retrieve meta-data about the current node
 // when broadcasting an alive message. Its length is limited to
 // the given byte size. This metadata is available in the Node structure.
 func (d *Delegate) NodeMeta(limit int) []byte {
-	d.logger.Info("Delegate.NodeMeta()", zap.Int("limit", limit))
-	return []byte{}
+	d.logger.Info("gossip.Delegate.NodeMeta()",
+		zap.Int("limit", limit),
+		zap.ByteString("returns", d.nmb))
+
+	return d.nmb
 }
 
 // NotifyMsg is called when a user-data message is received.
@@ -113,5 +126,16 @@ func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
 	if err := json.Unmarshal(buf, &state); err != nil {
 		panic(err)
 	}
-	d.State.SetState(state)
+	d.State.ImportState(state)
+}
+
+func (d *Delegate) setNodeMeta(nm *NodeMeta) error {
+	nmb, err := json.Marshal(nm)
+	if err != nil {
+		return fmt.Errorf("gossip.Delegate.setNodeMeta(), json.Marshal(): %w", err)
+	}
+
+	d.nm = nm
+	d.nmb = nmb
+	return nil
 }

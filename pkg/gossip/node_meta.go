@@ -1,14 +1,7 @@
 package gossip
 
-import "encoding/json"
-
 type (
 	NodeMeta struct {
-		NodeID uint16
+		NodeID uint16 `json:"node_id"`
 	}
 )
-
-func newNodeMetaBytes(id uint16) ([]byte, error) {
-	nm := NodeMeta{NodeID: id}
-	return json.Marshal(nm)
-}
