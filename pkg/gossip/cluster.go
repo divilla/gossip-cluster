@@ -19,6 +19,10 @@ type (
 		leaveCh    chan uint16
 		stopCh     <-chan struct{}
 	}
+
+	NodeMeta struct {
+		NodeID uint16 `json:"node_id"`
+	}
 )
 
 func NewCluster(logger *zap.Logger, cfg *Config, stopCh <-chan struct{}) (*Cluster, error) {
