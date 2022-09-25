@@ -47,11 +47,12 @@ func newDelegate(debug bool,
 // when broadcasting an alive message. Its length is limited to
 // the given byte size. This metadata is available in the Node structure.
 func (d *Delegate) NodeMeta(limit int) []byte {
-	d.logger.Info("gossip.Delegate.NodeMeta()",
-		zap.String("localNode.Name", d.State.localNodeName),
-		zap.Int("limit", limit),
-		zap.ByteString("returns", d.nmb),
-	)
+	if d.debug {
+		d.logger.Info("gossip.Delegate.NodeMeta()",
+			zap.String("localNode.Name", d.State.localNodeName),
+			zap.Int("limit", limit),
+			zap.ByteString("returns", d.nmb))
+	}
 
 	return d.nmb
 }
@@ -99,18 +100,29 @@ func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
 // data can be sent here. See MergeRemoteState as well. The `join`
 // boolean indicates this is for a join instead of a push/pull.
 func (d *Delegate) LocalState(join bool) []byte {
+	if d.debug {
+		d.logger.Info("gossip.Delegate.LocalState()",
+			zap.String("localNode.Name", d.State.localNodeName),
+			zap.Bool("join", true))
+	}
+
 	if join {
-		//d.logger.Info("gossip.Delegate.LocalState()",
-		//	zap.String("localNode.Name", d.State.localNodeName),
-		//	zap.Bool("join", true))
 		return nil
 	}
 
-	jsonBytes, _ := json.Marshal(d.State.LocalNodeState())
-	//d.logger.Info("gossip.Delegate.LocalState()",
-	//	zap.String("localNode.Name", d.State.localNodeName),
-	//	zap.ByteString("returns", jsonBytes),
-	//)
+	jsonBytes, err := json.Marshal(d.State.LocalNodeState())
+	if err != nil {
+		d.logger.Fatal("gossip.Delegate.LocalState() json.Marshal() error",
+			zap.String("localNode.Name", d.State.localNodeName),
+			zap.Error(err))
+	}
+
+	if d.debug {
+		jb, _ := json.Marshal(d.State.state.Nodes)
+		d.logger.Info("gossip.Delegate.LocalState()",
+			zap.String("localNode.Name", d.State.localNodeName),
+			zap.ByteString("state", jb))
+	}
 
 	return jsonBytes
 }
@@ -120,11 +132,13 @@ func (d *Delegate) LocalState(join bool) []byte {
 // remote side's LocalState call. The 'join'
 // boolean indicates this is for a join instead of a push/pull.
 func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
-	//d.logger.Info("Delegate.MergeRemoteState()",
-	//	zap.String("name", d.State.localNodeName),
-	//	zap.String("buf", string(buf)),
-	//	zap.Bool("join", join),
-	//)
+	if d.debug {
+		d.logger.Info("gossip.Delegate.MergeRemoteState()",
+			zap.String("localNode.Name", d.State.localNodeName),
+			zap.String("buf", string(buf)),
+			zap.Bool("join", join),
+		)
+	}
 
 	if join || len(buf) == 0 {
 		return

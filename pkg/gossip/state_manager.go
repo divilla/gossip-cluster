@@ -10,6 +10,7 @@ import (
 
 type (
 	StateManager struct {
+		debug         bool
 		logger        *zap.Logger
 		fsm           *fsm.FSM
 		localNodeID   uint16
@@ -19,8 +20,9 @@ type (
 	}
 )
 
-func newStateManager(logger *zap.Logger, localNodeID uint16, localNodeName string, active bool) *StateManager {
+func newStateManager(debug bool, logger *zap.Logger, localNodeID uint16, localNodeName string, active bool) *StateManager {
 	sm := &StateManager{
+		debug:         debug,
 		logger:        logger,
 		localNodeID:   localNodeID,
 		localNodeName: localNodeName,
@@ -137,68 +139,22 @@ func (s *StateManager) ElectLeader() bool {
 		}
 	}
 
-	if i <= 1 {
-		return true
-	}
-
 	// set the node as the leader, if not already
 	if s.state.Nodes[s.localNodeID].Leader != first {
 		ns := s.state.Nodes[s.localNodeID]
 		ns.Leader = first
+		ns.Timestamp = time.Now().UTC()
 		s.state.Nodes[s.localNodeID] = ns
-	} else {
-		return false
 	}
 
-	i = 0
-	for key := range s.state.Nodes {
-		if key < first {
-			first = key
-			i++
+	for _, node := range s.state.Nodes {
+		if node.Leader != first {
+			return false
 		}
 	}
 
-	return i <= 1
+	return true
 }
-
-//func (s *StateManager) CompareNodesDef() bool {
-//	s.rwm.RLock()
-//	defer s.rwm.RUnlock()
-//
-//	for nd := range s.state.nodesDef {
-//		if _, ok := s.state.Nodes[nd]; !ok {
-//			return false
-//		}
-//	}
-//
-//	return len(s.state.nodesDef) == len(s.state.Nodes)
-//}
-//
-//func (s *StateManager) MakeNodesDef(nds []uint16) {
-//	s.rwm.Lock()
-//	defer s.rwm.Unlock()
-//
-//	s.state.nodesDef = make(map[uint16]struct{})
-//	for _, nd := range nds {
-//		s.state.nodesDef[nd] = struct{}{}
-//	}
-//}
-//
-//func (s *StateManager) SetNodesDef(nd uint16) {
-//	s.rwm.Lock()
-//	defer s.rwm.Unlock()
-//
-//	s.state.nodesDef[nd] = struct{}{}
-//}
-//
-//func (s *StateManager) UnsetNodesDef(nd uint16) {
-//	s.rwm.Lock()
-//	defer s.rwm.Unlock()
-//
-//	if _, ok := s.state.nodesDef[nd]; ok {
-//		delete(s.state.nodesDef, nd)
-//	}
-//}
 
 func (s *StateManager) Size() int {
 	s.rwm.RLock()
@@ -214,6 +170,5 @@ func (s *StateManager) setLocalState() {
 	ns := s.state.Nodes[s.localNodeID]
 	ns.State = s.fsm.Current()
 	ns.Timestamp = time.Now().UTC()
-
 	s.state.Nodes[s.localNodeID] = ns
 }

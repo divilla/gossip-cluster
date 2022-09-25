@@ -39,7 +39,7 @@ func (c *Cluster) init() {
 	var err error
 
 	mlc := newMemberListConfig(c.Config)
-	c.State = newStateManager(c.logger, c.Config.NodeID, mlc.Name, len(c.Config.JoinNodes) == 0)
+	c.State = newStateManager(c.Config.Debug, c.logger, c.Config.NodeID, mlc.Name, len(c.Config.JoinNodes) == 0)
 
 	tlq := newTlq(c.Memberlist)
 
@@ -53,6 +53,10 @@ func (c *Cluster) init() {
 		panic(fmt.Errorf("memberlist.Create() error: %w", err))
 	}
 
+	starterCh := make(chan struct{})
+	go c.onJoinOrLeave(starterCh)
+	<-starterCh
+
 	c.Messenger = newMessenger(c.logger, c.Memberlist, tlq)
 
 	if len(c.Config.JoinNodes) > 0 {
@@ -64,45 +68,58 @@ func (c *Cluster) init() {
 	} else {
 		c.State.SetState(Idle)
 	}
-
-	go c.onJoinOrLeave()
 }
 
-func (c *Cluster) onJoinOrLeave() {
+func (c *Cluster) onJoinOrLeave(starter chan struct{}) {
 	var id uint16
-	//var oldCancel context.CancelFunc
+	var oldCancel context.CancelFunc
 
 	for {
+		starter <- struct{}{}
+
 		select {
 		case <-c.stopCh:
 			return
 		case id = <-c.joinCh:
-			//if oldCancel != nil {
-			//	oldCancel()
-			//}
+			if oldCancel != nil {
+				oldCancel()
+			}
 			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(c.Config.AssembleTimeoutS)*time.Second)
-			//oldCancel = cancel
-			go c.assemble(ctx, cancel, id)
-			//cancel()
-			//oldCancel = nil
+			oldCancel = cancel
+			finishCh := make(chan struct{}, 1)
+			go c.assemble(ctx, finishCh, id)
+			go func() {
+				select {
+				case <-finishCh:
+					cancel()
+				case <-ctx.Done():
+				}
+				oldCancel = nil
+			}()
 		case id = <-c.leaveCh:
-			//if oldCancel != nil {
-			//	oldCancel()
-			//}
+			if oldCancel != nil {
+				oldCancel()
+			}
 			c.State.RemoveNode(id)
 			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(c.Config.AssembleTimeoutS)*time.Second)
-			//oldCancel = cancel
-			go c.electLeader(ctx, cancel)
-			//cancel()
-			//oldCancel = nil
+			oldCancel = cancel
+			finishCh := make(chan struct{}, 1)
+			go c.electLeader(ctx, finishCh)
+			go func() {
+				select {
+				case <-finishCh:
+					cancel()
+				case <-ctx.Done():
+				}
+
+				oldCancel = nil
+			}()
 		}
 	}
 }
 
 func (c *Cluster) join(ctx context.Context) error {
 	var err error
-	//var nodeMeta NodeMeta
-	//var nds []uint16
 
 	if err = c.State.Trigger(Join); err != nil {
 		return err
@@ -111,31 +128,24 @@ func (c *Cluster) join(ctx context.Context) error {
 	for {
 		_, err = c.Memberlist.Join(c.Config.JoinNodes)
 		if err == nil {
-			//for _, node := range c.Memberlist.Members() {
-			//	if err = json.Unmarshal(node.Meta, &nodeMeta); err != nil {
-			//		return fmt.Errorf("gossip.Cluster.join(), json.Unmarshal() error: %w", err)
-			//	}
-			//	nds = append(nds, nodeMeta.NodeID)
-			//}
-			//
-			//c.State.MakeNodesDef(nds)
-
 			if err = c.State.Trigger(Joined); err != nil {
 				return err
 			}
-
 			return nil
 		}
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("gossip.Cluster.join(), context canceled: %w", ctx.Err())
+			err = ctx.Err()
+			c.logger.Error("gossip.Cluster.join(), context canceled", zap.Error(err))
+
+			return err
 		case <-time.After(time.Second):
 		}
 	}
 }
 
-func (c *Cluster) assemble(ctx context.Context, cancel context.CancelFunc, id uint16) {
+func (c *Cluster) assemble(ctx context.Context, finishCh chan struct{}, id uint16) {
 	var err error
 
 	for {
@@ -153,10 +163,11 @@ func (c *Cluster) assemble(ctx context.Context, cancel context.CancelFunc, id ui
 	for {
 		if c.State.HasNode(id) {
 			if err = c.State.Trigger(Assembled); err != nil {
+				finishCh <- struct{}{}
 				c.logger.Fatal("gossip.Cluster.assemble(), trigger event Assembled", zap.Error(err))
+			} else {
+				break
 			}
-
-			c.electLeader(ctx, cancel)
 		}
 
 		select {
@@ -165,9 +176,11 @@ func (c *Cluster) assemble(ctx context.Context, cancel context.CancelFunc, id ui
 		case <-time.After(time.Second):
 		}
 	}
+
+	c.electLeader(ctx, finishCh)
 }
 
-func (c *Cluster) electLeader(ctx context.Context, cancel context.CancelFunc) {
+func (c *Cluster) electLeader(ctx context.Context, finishCh chan struct{}) {
 	var err error
 
 	if err = c.State.Trigger(Elect); err != nil {
@@ -180,12 +193,7 @@ func (c *Cluster) electLeader(ctx context.Context, cancel context.CancelFunc) {
 				c.logger.Fatal("gossip.Cluster.electLeader(), trigger event Elected", zap.Error(err))
 			}
 
-			fmt.Println("****************************************************************************")
-			fmt.Println(c.State.state.Nodes)
-			fmt.Println("****************************************************************************")
-
-			//cancel()
-
+			finishCh <- struct{}{}
 			return
 		}
 

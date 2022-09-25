@@ -1,7 +1,6 @@
 package gossip
 
 import (
-	"fmt"
 	"github.com/looplab/fsm"
 	"go.uber.org/zap"
 	"time"
@@ -85,15 +84,13 @@ func newFSM(sm *StateManager) *fsm.FSM {
 	callbacks := make(fsm.Callbacks, len(events))
 	for _, event := range events {
 		callbacks[event.Name] = func(e *fsm.Event) {
-			fmt.Println()
-			fmt.Println("----------------------------------------------------------------------------------------")
-			sm.logger.Info("event",
-				zap.String("node", sm.localNodeName),
-				zap.String("name", e.Event),
-				zap.String("src", e.Src),
-				zap.String("dst", e.Dst),
-			)
-			fmt.Println("----------------------------------------------------------------------------------------")
+			if sm.debug {
+				sm.logger.Info("event",
+					zap.String("node", sm.localNodeName),
+					zap.String("name", e.Event),
+					zap.String("src", e.Src),
+					zap.String("dst", e.Dst))
+			}
 		}
 	}
 
