@@ -19,7 +19,7 @@ type (
 	}
 )
 
-func newStateManager(logger *zap.Logger, localNodeID uint16, localNodeName string) *StateManager {
+func newStateManager(logger *zap.Logger, localNodeID uint16, localNodeName string, active bool) *StateManager {
 	sm := &StateManager{
 		logger:        logger,
 		localNodeID:   localNodeID,
@@ -27,7 +27,7 @@ func newStateManager(logger *zap.Logger, localNodeID uint16, localNodeName strin
 	}
 
 	sm.fsm = newFSM(sm)
-	sm.state = newState(localNodeID, localNodeName, sm.fsm.Current())
+	sm.state = newState(localNodeID, localNodeName, sm.fsm.Current(), active)
 
 	return sm
 }
@@ -36,18 +36,50 @@ func (s *StateManager) LocalNodeID() uint16 {
 	return s.localNodeID
 }
 
-func (s *StateManager) GetState() State {
+func (s *StateManager) IsLocalNode(key uint16) bool {
+	return s.localNodeID == key
+}
+
+func (s *StateManager) HasActiveNode(key uint16) bool {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
 
-	return *s.state
+	node, ok := s.state.Nodes[key]
+	return node.Active && ok
 }
 
-func (s *StateManager) SetState(state State) {
+func (s *StateManager) RemoveNode(id uint16) bool {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
-	for key, node := range state.Nodes {
+	if _, ok := s.state.Nodes[id]; !ok {
+		return false
+	}
+
+	delete(s.state.Nodes, id)
+
+	return true
+}
+
+func (s *StateManager) GetNodes() map[uint16]NodeState {
+	s.rwm.RLock()
+	defer s.rwm.RUnlock()
+
+	return s.state.Nodes
+}
+
+func (s *StateManager) SetState(state map[uint16]NodeState) {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	for key, node := range state {
+		if key == s.localNodeID && !node.Active {
+			node.Active = true
+			node.Timestamp = time.Now().UTC()
+			s.state.Nodes[key] = node
+			continue
+		}
+
 		if key == s.localNodeID {
 			continue
 		}
@@ -62,8 +94,13 @@ func (s *StateManager) SetState(state State) {
 			continue
 		}
 	}
+}
 
-	//s.ElectLeader()
+func (s *StateManager) Current() string {
+	s.rwm.RLock()
+	defer s.rwm.RUnlock()
+
+	return s.fsm.Current()
 }
 
 func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
@@ -75,11 +112,18 @@ func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
 	return nil
 }
 
+func (s *StateManager) IsLeader() bool {
+	s.rwm.RLock()
+	defer s.rwm.RUnlock()
+
+	return s.state.Nodes[s.localNodeID].Leader == s.localNodeID
+}
+
 func (s *StateManager) ElectLeader() bool {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
-	// choose node with the smallest Config.ServerID
+	// choose node with the smallest Config.NodeID
 	first := uint16(math.MaxUint16)
 	for key := range s.state.Nodes {
 		if key < first {

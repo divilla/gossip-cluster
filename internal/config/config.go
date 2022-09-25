@@ -10,7 +10,7 @@ import (
 )
 
 type Config struct {
-	Nodes []*gossip.Config
+	Nodes []*gossip.Config `yaml:"nodes"`
 }
 
 func New(paths ...string) (*Config, error) {

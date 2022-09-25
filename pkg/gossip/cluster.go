@@ -14,15 +14,19 @@ type (
 		State      *StateManager
 		Messenger  *Messenger
 		logger     *zap.Logger
+		joinCh     chan uint16
+		leaveCh    chan uint16
 		stopCh     <-chan struct{}
 	}
 )
 
 func NewCluster(logger *zap.Logger, cfg *Config, stopCh <-chan struct{}) (*Cluster, error) {
 	cluster := &Cluster{
-		Config: parseDefaults(cfg),
-		logger: logger,
-		stopCh: stopCh,
+		Config:  parseDefaults(cfg),
+		logger:  logger,
+		joinCh:  make(chan uint16, 1),
+		leaveCh: make(chan uint16, 1),
+		stopCh:  stopCh,
 	}
 
 	go cluster.init()
@@ -37,23 +41,61 @@ func (c *Cluster) init() {
 	if c.Memberlist, err = memberlist.Create(mlc); err != nil {
 		panic(fmt.Errorf("memberlist.Create() error: %w", err))
 	}
-	c.State = newStateManager(c.logger, c.Config.ServerID, c.Memberlist.LocalNode().Name)
+
+	nm, err := newNodeMetaBytes(c.Config.NodeID)
+	if err != nil {
+		panic(err)
+	}
+	c.Memberlist.LocalNode().Meta = nm
+
+	c.State = newStateManager(c.logger, c.Config.NodeID, c.Memberlist.LocalNode().Name, len(c.Config.JoinNodes) == 0)
 	tlq := newTlq(c.Memberlist)
 	mlc.Delegate = newDelegate(c.logger, c.Memberlist, tlq, c.State)
+	mlc.Events = NewEventDelegate(c.Config.Debug, c.logger, c.joinCh, c.leaveCh)
 	c.Messenger = newMessenger(c.logger, c.Memberlist, tlq)
 
 	if len(c.Config.JoinNodes) > 0 {
 		if err = c.join(); err != nil {
 			panic(err)
 		}
+	} else {
+		if err = c.assemble(c.State.LocalNodeID(), true); err != nil {
+			panic(err)
+		}
+
+		if err = c.electLeader(); err != nil {
+			panic(err)
+		}
 	}
 
-	if err = c.assemble(); err != nil {
-		panic(err)
-	}
+	go c.onJoinOrLeave()
+}
 
-	if err = c.electLeader(); err != nil {
-		panic(err)
+func (c *Cluster) onJoinOrLeave() {
+	var err error
+	var id uint16
+
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case id = <-c.joinCh:
+			if err = c.assemble(id, true); err != nil {
+				panic(err)
+			}
+
+			if err = c.electLeader(); err != nil {
+				panic(err)
+			}
+		case id = <-c.leaveCh:
+			if err = c.assemble(id, false); err != nil {
+				panic(err)
+			}
+
+			if err = c.electLeader(); err != nil {
+				panic(err)
+			}
+		}
 	}
 }
 
@@ -87,25 +129,42 @@ func (c *Cluster) join() error {
 	}
 }
 
-func (c *Cluster) assemble() error {
+func (c *Cluster) assemble(id uint16, join bool) error {
 	var err error
-
-	if err = c.State.Trigger(Assemble); err != nil {
-		return err
-	}
-
 	i := 0
+
+	// reach Assembling state
 	for {
 		if i == c.Config.AssembleTimeoutS {
 			return fmt.Errorf("gossip.Cluster.assemble() timeout: %d s", c.Config.AssembleTimeoutS)
 		}
 
-		if c.Memberlist.NumMembers() >= c.Config.JoinNodesNum && c.State.Size() >= c.Config.JoinNodesNum {
-			if err = c.State.Trigger(Assembled); err != nil {
-				return err
-			}
+		if err = c.State.Trigger(Assemble); err == nil {
+			break
+		}
 
+		select {
+		case <-c.stopCh:
+			return err
+		case <-time.After(time.Second):
+			i++
+		}
+	}
+
+	for {
+		if i == c.Config.AssembleTimeoutS {
+			return fmt.Errorf("gossip.Cluster.assemble() timeout: %d s", c.Config.AssembleTimeoutS)
+		}
+
+		if !join {
+			if !c.State.RemoveNode(id) {
+				return fmt.Errorf("assemble failed to remove node: %d", id)
+			}
 			return nil
+		}
+
+		if join && c.State.HasActiveNode(id) {
+			return c.State.Trigger(Assembled)
 		}
 
 		select {
@@ -150,7 +209,7 @@ func (c *Cluster) electLeader() error {
 func newMemberListConfig(c *Config) *memberlist.Config {
 	mlc := memberlist.DefaultLANConfig()
 	mlc.Logger = nil
-	mlc.Name = fmt.Sprintf("%06d-%s", c.ServerID, mlc.Name)
+	mlc.Name = fmt.Sprintf("%06d-%s", c.NodeID, mlc.Name)
 
 	if c.BindAddr != "" {
 		mlc.BindAddr = c.BindAddr
@@ -162,13 +221,13 @@ func newMemberListConfig(c *Config) *memberlist.Config {
 		mlc.AdvertisePort = c.BindPort
 	}
 
-	//if c.AdvertiseAddr != "" {
-	//	mlc.AdvertiseAddr = c.AdvertiseAddr
-	//}
-	//
-	//if c.AdvertisePort > 0 {
-	//	mlc.AdvertisePort = c.AdvertisePort
-	//}
+	if c.AdvertiseAddr != "" {
+		mlc.AdvertiseAddr = c.AdvertiseAddr
+	}
+
+	if c.AdvertisePort > 0 {
+		mlc.AdvertisePort = c.AdvertisePort
+	}
 
 	if c.PushPullIntervalMS >= 0 {
 		mlc.PushPullInterval = time.Duration(c.PushPullIntervalMS) * time.Millisecond

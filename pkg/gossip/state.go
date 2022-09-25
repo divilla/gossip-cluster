@@ -28,9 +28,10 @@ type (
 	}
 
 	NodeState struct {
-		Leader    uint16    `json:"leader"`
 		Name      string    `json:"name"`
-		State     StateName `json:"State"`
+		State     StateName `json:"state"`
+		Leader    uint16    `json:"leader"`
+		Active    bool      `json:"active"`
 		Timestamp time.Time `json:"timestamp"`
 	}
 
@@ -38,12 +39,13 @@ type (
 	EventName = string
 )
 
-func newState(localNodeID uint16, localNodeName string, localNodeState StateName) *State {
+func newState(localNodeID uint16, localNodeName string, localNodeState StateName, active bool) *State {
 	return &State{
 		Nodes: map[uint16]NodeState{
 			localNodeID: {
 				Name:      localNodeName,
 				State:     localNodeState,
+				Active:    active,
 				Timestamp: time.Now().UTC(),
 			},
 		},
@@ -54,7 +56,7 @@ func newFSM(sm *StateManager) *fsm.FSM {
 	events := fsm.Events{
 		{Name: Join, Src: []string{Starting}, Dst: Joining},
 		{Name: Joined, Src: []string{Joining}, Dst: Starting},
-		{Name: Assemble, Src: []string{Starting}, Dst: Assembling},
+		{Name: Assemble, Src: []string{Starting, Idle}, Dst: Assembling},
 		{Name: Assembled, Src: []string{Assembling}, Dst: Idle},
 		{Name: Elect, Src: []string{Idle}, Dst: Electing},
 		{Name: Elected, Src: []string{Electing}, Dst: Idle},

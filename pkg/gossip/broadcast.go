@@ -7,7 +7,6 @@ import (
 
 type (
 	Broadcast struct {
-		memberlist.NamedBroadcast
 		logger   *zap.Logger
 		ml       *memberlist.Memberlist
 		name     string

@@ -9,7 +9,7 @@ const (
 
 type (
 	Config struct {
-		ServerID           uint16 `yaml:"server_id"`
+		NodeID             uint16 `yaml:"node_id"`
 		BindAddr           string `yaml:"bind_addr"`
 		BindPort           int    `yaml:"bind_port"`
 		AdvertiseAddr      string `yaml:"advertise_addr"`
@@ -21,6 +21,8 @@ type (
 		JoinTimeoutS     int      `yaml:"join_timeout_s"`
 		AssembleTimeoutS int      `yaml:"assemble_timeout_s"`
 		ElectLeaderS     int      `yaml:"elect_leader_s"`
+
+		Debug bool `yaml:"debug"`
 	}
 )
 
