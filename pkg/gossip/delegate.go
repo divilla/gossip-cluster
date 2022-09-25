@@ -10,6 +10,7 @@ import (
 
 type (
 	Delegate struct {
+		debug  bool
 		logger *zap.Logger
 		ml     *memberlist.Memberlist
 		tlq    *memberlist.TransmitLimitedQueue
@@ -22,8 +23,9 @@ type (
 	}
 )
 
-func newDelegate(logger *zap.Logger, ml *memberlist.Memberlist, tlq *memberlist.TransmitLimitedQueue, state *StateManager) *Delegate {
+func newDelegate(debug bool, logger *zap.Logger, ml *memberlist.Memberlist, tlq *memberlist.TransmitLimitedQueue, state *StateManager) *Delegate {
 	return &Delegate{
+		debug:  debug,
 		logger: logger,
 		ml:     ml,
 		tlq:    tlq,
@@ -83,12 +85,12 @@ func (d *Delegate) GetBroadcasts(overhead, limit int) [][]byte {
 // boolean indicates this is for a join instead of a push/pull.
 func (d *Delegate) LocalState(join bool) []byte {
 	if join {
-		d.logger.Info("gossip.Delegate.LocalState", zap.Bool("join", true))
+		d.logger.Info("gossip.Delegate.LocalState", zap.String("node", d.State.localNodeName), zap.Bool("join", true))
 		return nil
 	}
 
 	b, _ := json.Marshal(d.State.GetNodes())
-	d.logger.Info("gossip.Delegate.LocalState", zap.ByteString("join", b))
+	d.logger.Info("gossip.Delegate.LocalState", zap.String("node", d.State.localNodeName), zap.ByteString("join", b))
 	return b
 }
 
@@ -98,6 +100,7 @@ func (d *Delegate) LocalState(join bool) []byte {
 // boolean indicates this is for a join instead of a push/pull.
 func (d *Delegate) MergeRemoteState(buf []byte, join bool) {
 	d.logger.Info("Delegate.MergeRemoteState()",
+		zap.String("name", d.State.localNodeName),
 		zap.String("buf", string(buf)),
 		zap.Bool("join", join),
 	)

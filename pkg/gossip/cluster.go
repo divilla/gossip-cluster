@@ -24,8 +24,8 @@ func NewCluster(logger *zap.Logger, cfg *Config, stopCh <-chan struct{}) (*Clust
 	cluster := &Cluster{
 		Config:  parseDefaults(cfg),
 		logger:  logger,
-		joinCh:  make(chan uint16, 1),
-		leaveCh: make(chan uint16, 1),
+		joinCh:  make(chan uint16, 10),
+		leaveCh: make(chan uint16, 10),
 		stopCh:  stopCh,
 	}
 
@@ -50,20 +50,12 @@ func (c *Cluster) init() {
 
 	c.State = newStateManager(c.logger, c.Config.NodeID, c.Memberlist.LocalNode().Name, len(c.Config.JoinNodes) == 0)
 	tlq := newTlq(c.Memberlist)
-	mlc.Delegate = newDelegate(c.logger, c.Memberlist, tlq, c.State)
+	mlc.Delegate = newDelegate(c.Config.Debug, c.logger, c.Memberlist, tlq, c.State)
 	mlc.Events = NewEventDelegate(c.Config.Debug, c.logger, c.joinCh, c.leaveCh)
 	c.Messenger = newMessenger(c.logger, c.Memberlist, tlq)
 
 	if len(c.Config.JoinNodes) > 0 {
 		if err = c.join(); err != nil {
-			panic(err)
-		}
-	} else {
-		if err = c.assemble(c.State.LocalNodeID(), true); err != nil {
-			panic(err)
-		}
-
-		if err = c.electLeader(); err != nil {
 			panic(err)
 		}
 	}
@@ -83,7 +75,6 @@ func (c *Cluster) onJoinOrLeave() {
 			if err = c.assemble(id, true); err != nil {
 				panic(err)
 			}
-
 			if err = c.electLeader(); err != nil {
 				panic(err)
 			}
@@ -91,7 +82,6 @@ func (c *Cluster) onJoinOrLeave() {
 			if err = c.assemble(id, false); err != nil {
 				panic(err)
 			}
-
 			if err = c.electLeader(); err != nil {
 				panic(err)
 			}
