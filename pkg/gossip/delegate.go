@@ -110,7 +110,7 @@ func (d *Delegate) LocalState(join bool) []byte {
 		return nil
 	}
 
-	jsonBytes, err := json.Marshal(d.State.LocalNodeState())
+	jsonBytes, err := json.Marshal(d.State.LocalState())
 	if err != nil {
 		d.logger.Fatal("gossip.Delegate.LocalState() json.Marshal() error",
 			zap.String("localNode.Name", d.State.localNodeName),

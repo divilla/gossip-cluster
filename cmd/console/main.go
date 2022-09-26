@@ -6,6 +6,8 @@ import (
 	"go.uber.org/zap"
 	"os"
 	"os/signal"
+	"runtime"
+	"time"
 )
 
 func main() {
@@ -33,6 +35,15 @@ func main() {
 	if _, err = gossip.NewCluster(logger, cfg.Nodes[2], stopCh); err != nil {
 		panic(err)
 	}
+
+	go func() {
+		runtime.Gosched()
+
+		<-time.After(32 * time.Second)
+		if _, err = gossip.NewCluster(logger, cfg.Nodes[1], stopCh); err != nil {
+			panic(err)
+		}
+	}()
 
 	<-quitCh
 	close(stopCh)

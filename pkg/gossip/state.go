@@ -3,18 +3,19 @@ package gossip
 import (
 	"github.com/looplab/fsm"
 	"go.uber.org/zap"
+	"math"
 	"time"
 )
 
 const (
 	Idle        StateName = "idle"
 	Configuring StateName = "configuring"
-	Starting    StateName = "starting"
 	Joining     StateName = "joining"
 	Assembling  StateName = "assembling"
 	Electing    StateName = "electing"
 	Assigning   StateName = "balancing"
 	Working     StateName = "working"
+	Starting    StateName = "starting"
 	Stopping    StateName = "stopping"
 
 	Join      EventName = "join"
@@ -23,8 +24,8 @@ const (
 	Assembled EventName = "assembled"
 	Elect     EventName = "elect"
 	Elected   EventName = "elected"
-	Assign    EventName = "balance"
-	Assigned  EventName = "balanced"
+	Assign    EventName = "assign"
+	Assigned  EventName = "assigned"
 	Start     EventName = "start"
 	Started   EventName = "started"
 	Stop      EventName = "stop"
@@ -44,8 +45,9 @@ var Workers = []Worker{PlDb, UaDb, RoDb, KzDb, PtDb, BgDb, UzDb}
 
 type (
 	State struct {
-		Nodes    map[uint16]NodeState `json:"nodes"`
-		nodesDef map[uint16]struct{}
+		Indexes []uint16
+		Nodes   map[uint16]NodeState `json:"nodes"`
+		Working map[string]bool
 	}
 
 	NodeState struct {
@@ -53,7 +55,7 @@ type (
 		State     StateName `json:"state"`
 		Leader    uint16    `json:"leader"`
 		Workers   []Worker  `json:"workers"`
-		Assigned  bool      `json:"assigned"`
+		Working   bool      `json:"working"`
 		Timestamp time.Time `json:"timestamp"`
 	}
 
@@ -63,25 +65,31 @@ type (
 )
 
 func newState(localNodeID uint16, localNodeName string, localNodeState StateName) *State {
+	working := make(map[string]bool)
+	for _, worker := range Workers {
+		working[worker] = false
+	}
+
 	return &State{
+		Indexes: []uint16{localNodeID},
 		Nodes: map[uint16]NodeState{
 			localNodeID: {
 				Name:      localNodeName,
 				State:     localNodeState,
+				Leader:    math.MaxUint16,
+				Workers:   make([]string, 0),
 				Timestamp: time.Now().UTC(),
 			},
 		},
-		nodesDef: map[uint16]struct{}{
-			localNodeID: {},
-		},
+		Working: working,
 	}
 }
 
 func newFSM(sm *StateManager) *fsm.FSM {
 	events := fsm.Events{
-		{Name: Join, Src: []string{Starting}, Dst: Joining},
-		{Name: Joined, Src: []string{Joining}, Dst: Idle},
-		{Name: Assemble, Src: []string{Idle, Configuring}, Dst: Assembling},
+		{Name: Join, Src: []string{Idle, Configuring, Joining, Assembling, Electing, Assigning, Working, Starting, Stopping}, Dst: Joining},
+		{Name: Joined, Src: []string{Joining}, Dst: Configuring},
+		{Name: Assemble, Src: []string{Configuring}, Dst: Assembling},
 		{Name: Assembled, Src: []string{Assembling}, Dst: Configuring},
 		{Name: Elect, Src: []string{Configuring}, Dst: Electing},
 		{Name: Elected, Src: []string{Electing}, Dst: Configuring},
@@ -89,8 +97,8 @@ func newFSM(sm *StateManager) *fsm.FSM {
 		{Name: Assigned, Src: []string{Assigning}, Dst: Idle},
 		{Name: Start, Src: []string{Idle}, Dst: Starting},
 		{Name: Started, Src: []string{Starting}, Dst: Working},
-		{Name: Stop, Src: []string{Working}, Dst: Stopping},
-		{Name: Stopped, Src: []string{Stopping}, Dst: Idle},
+		{Name: Stop, Src: []string{Idle, Configuring, Joining, Assembling, Electing, Assigning, Working, Starting, Stopping}, Dst: Stopping},
+		{Name: Stopped, Src: []string{Stopping}, Dst: Configuring},
 		{Name: Finish, Src: []string{Assembling}, Dst: Idle},
 	}
 

@@ -3,7 +3,7 @@ package gossip
 import (
 	"github.com/looplab/fsm"
 	"go.uber.org/zap"
-	"math"
+	"sort"
 	"sync"
 	"time"
 )
@@ -42,6 +42,10 @@ func (s *StateManager) IsLocalNode(key uint16) bool {
 	return s.localNodeID == key
 }
 
+func (s *StateManager) LocalNodeState() NodeState {
+	return s.state.Nodes[s.localNodeID]
+}
+
 func (s *StateManager) HasNode(key uint16) bool {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
@@ -60,14 +64,16 @@ func (s *StateManager) RemoveNode(id uint16) bool {
 
 	delete(s.state.Nodes, id)
 
+	s.setIndexes()
+
 	return true
 }
 
-func (s *StateManager) LocalNodeState() map[uint16]NodeState {
+func (s *StateManager) LocalState() map[uint16]NodeState {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
 
-	ns := s.state.Nodes[s.localNodeID]
+	ns := s.LocalNodeState()
 	mns := map[uint16]NodeState{
 		s.localNodeID: ns,
 	}
@@ -79,12 +85,15 @@ func (s *StateManager) ImportState(state map[uint16]NodeState) {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
+	var hasNew bool
+
 	for key, node := range state {
 		if key == s.localNodeID {
 			continue
 		}
 
 		if _, ok := s.state.Nodes[key]; !ok {
+			hasNew = true
 			s.state.Nodes[key] = node
 			continue
 		}
@@ -94,34 +103,44 @@ func (s *StateManager) ImportState(state map[uint16]NodeState) {
 			continue
 		}
 	}
+
+	if hasNew {
+		s.setIndexes()
+	}
 }
 
 func (s *StateManager) CurrentState() string {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
 
-	return s.fsm.Current()
+	return s.LocalNodeState().State
 }
 
 func (s *StateManager) Trigger(name EventName, args ...interface{}) error {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
 	if err := s.fsm.Event(name, args...); err != nil {
 		return err
 	}
+	s.setCurrentState()
 
-	s.setLocalState()
 	return nil
 }
 
 func (s *StateManager) SetState(name StateName) {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
 	s.fsm.SetState(name)
-	s.setLocalState()
+	s.setCurrentState()
 }
 
 func (s *StateManager) IsLeader() bool {
 	s.rwm.RLock()
 	defer s.rwm.RUnlock()
 
-	return s.state.Nodes[s.localNodeID].Leader == s.localNodeID
+	return s.LocalNodeState().Leader == s.localNodeID
 }
 
 // ElectLeader sets leader for LocalNode & returns true when 100% quorum is achieved
@@ -131,24 +150,28 @@ func (s *StateManager) ElectLeader() bool {
 
 	// choose node with the smallest Config.NodeID
 	i := 0
-	first := uint16(math.MaxUint16)
-	for key := range s.state.Nodes {
-		if key < first {
-			first = key
+	min := s.LocalNodeState().Leader
+	for id := range s.state.Nodes {
+		if id < min {
+			min = id
 			i++
 		}
 	}
 
+	if i == 0 {
+		return true
+	}
+
 	// set the node as the leader, if not already
-	if s.state.Nodes[s.localNodeID].Leader != first {
+	if s.LocalNodeState().Leader != min {
 		ns := s.state.Nodes[s.localNodeID]
-		ns.Leader = first
+		ns.Leader = min
 		ns.Timestamp = time.Now().UTC()
 		s.state.Nodes[s.localNodeID] = ns
 	}
 
 	for _, node := range s.state.Nodes {
-		if node.Leader != first {
+		if node.Leader != min {
 			return false
 		}
 	}
@@ -161,29 +184,64 @@ func (s *StateManager) AssignWorkers() {
 	defer s.rwm.Unlock()
 
 	var workers []Worker
-	l := len(s.state.Nodes)
+	length := len(s.state.Nodes)
+	index := s.getLocalNodeIndex()
 	for key, worker := range Workers {
-		if key%l == int(s.localNodeID)-1 {
+		if key%length == index {
 			workers = append(workers, worker)
 		}
 	}
 
-	if len(workers) > 0 {
-		ns := s.state.Nodes[s.localNodeID]
-		ns.Workers = workers
-		ns.Assigned = true
-		ns.Timestamp = time.Now().UTC()
-		s.state.Nodes[s.localNodeID] = ns
-	}
+	ns := s.LocalNodeState()
+	ns.Workers = workers
+	ns.Timestamp = time.Now().UTC()
+	s.state.Nodes[s.localNodeID] = ns
 }
 
 func (s *StateManager) ReleaseWorkers() {
 	s.rwm.Lock()
 	defer s.rwm.Unlock()
 
-	ns := s.state.Nodes[s.localNodeID]
-	ns.Workers = nil
-	ns.Assigned = false
+	ns := s.LocalNodeState()
+	ns.Workers = make([]string, 0)
+	ns.Timestamp = time.Now().UTC()
+	s.state.Nodes[s.localNodeID] = ns
+}
+
+func (s *StateManager) StartWorkers() {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	for worker := range s.state.Working {
+		s.state.Working[worker] = false
+	}
+
+	var isWorking bool
+	for _, worker := range s.LocalNodeState().Workers {
+		isWorking = true
+		s.state.Working[worker] = true
+	}
+
+	ns := s.LocalNodeState()
+	ns.Working = isWorking
+	ns.Timestamp = time.Now().UTC()
+	s.state.Nodes[s.localNodeID] = ns
+}
+
+func (s *StateManager) StopWorkers() {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
+
+	if !s.LocalNodeState().Working {
+		return
+	}
+
+	for worker := range s.state.Working {
+		s.state.Working[worker] = false
+	}
+
+	ns := s.LocalNodeState()
+	ns.Working = false
 	ns.Timestamp = time.Now().UTC()
 	s.state.Nodes[s.localNodeID] = ns
 }
@@ -195,11 +253,37 @@ func (s *StateManager) Size() int {
 	return len(s.state.Nodes)
 }
 
-func (s *StateManager) setLocalState() {
-	s.rwm.Lock()
-	defer s.rwm.Unlock()
+func (s *StateManager) getLocalNodeIndex() int {
+	for index, id := range s.state.Indexes {
+		if s.localNodeID == id {
+			return index
+		}
+	}
 
-	ns := s.state.Nodes[s.localNodeID]
+	return -1
+}
+
+func (s *StateManager) setIndexes() {
+	nodes := s.state.Nodes
+	indexes := make([]uint16, len(nodes))
+
+	i := 0
+	for id := range nodes {
+		indexes[i] = id
+		i++
+	}
+
+	sort.Slice(indexes,
+		func(i, j int) bool {
+			return indexes[i] < indexes[j]
+		},
+	)
+
+	s.state.Indexes = indexes
+}
+
+func (s *StateManager) setCurrentState() {
+	ns := s.LocalNodeState()
 	ns.State = s.fsm.Current()
 	ns.Timestamp = time.Now().UTC()
 	s.state.Nodes[s.localNodeID] = ns

@@ -2,9 +2,11 @@ package gossip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/hashicorp/memberlist"
 	"go.uber.org/zap"
+	"runtime"
 	"time"
 )
 
@@ -23,6 +25,8 @@ type (
 	NodeMeta struct {
 		NodeID uint16 `json:"node_id"`
 	}
+
+	FinishFunc func()
 )
 
 func NewCluster(logger *zap.Logger, cfg *Config, stopCh <-chan struct{}) (*Cluster, error) {
@@ -46,7 +50,6 @@ func (c *Cluster) init() {
 	c.State = newStateManager(c.Config.Debug, c.logger, c.Config.NodeID, mlc.Name, len(c.Config.JoinNodes) == 0)
 
 	tlq := newTlq(c.Memberlist)
-
 	nodeMeta := &NodeMeta{NodeID: c.Config.NodeID}
 	if mlc.Delegate, err = newDelegate(c.Config.Debug, c.logger, tlq, nodeMeta, c.State); err != nil {
 		panic(err)
@@ -57,177 +60,318 @@ func (c *Cluster) init() {
 		panic(fmt.Errorf("memberlist.Create() error: %w", err))
 	}
 
-	starterCh := make(chan struct{})
-	go c.onJoinOrLeave(starterCh)
-	<-starterCh
+	go c.onJoinOrLeave()
 
 	c.Messenger = newMessenger(c.logger, c.Memberlist, tlq)
 
 	if len(c.Config.JoinNodes) > 0 {
-		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(c.Config.JoinTimeoutS)*time.Second)
-		if err = c.join(ctx); err != nil {
-			panic(err)
+		if err = c.join(); err != nil {
+			c.logger.Error("gossip.Cluster.join()", zap.Error(err))
 		}
-		cancel()
 	} else {
+		//c.joinCh <- c.Config.NodeID
 		c.State.SetState(Idle)
 	}
+
+	go func() {
+		runtime.Gosched()
+
+		if c.Memberlist.LocalNode().Port != 8082 {
+			return
+		}
+		<-time.After(16 * time.Second)
+		c.logger.Info("Shutting down node 2")
+		if err = c.Memberlist.Shutdown(); err != nil {
+			c.logger.Fatal("Memberlist.Shutdown error", zap.Error(err))
+		}
+	}()
 }
 
-func (c *Cluster) onJoinOrLeave(starter chan struct{}) {
+func (c *Cluster) onJoinOrLeave() {
+	runtime.Gosched()
+
 	var id uint16
 	var oldCancel context.CancelFunc
+	var err error
 
 	for {
-		starter <- struct{}{}
-
 		select {
 		case <-c.stopCh:
 			return
 		case id = <-c.joinCh:
 			if oldCancel != nil {
 				oldCancel()
-			}
-			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(c.Config.AssembleTimeoutS)*time.Second)
-			oldCancel = cancel
-			finishCh := make(chan struct{}, 1)
-			go c.assemble(ctx, finishCh, id)
-			go func() {
-				select {
-				case <-finishCh:
-					cancel()
-				case <-ctx.Done():
-				}
 				oldCancel = nil
+			}
+
+			go func() {
+				runtime.Gosched()
+
+				ctx, cancel := makeContext(c.Config.AssembleTimeoutS)
+				oldCancel = cancel
+
+				if err = c.stop(ctx, cancel); err != nil {
+					c.logger.Error("gossip.Cluster.elect()", zap.Error(err))
+					return
+				}
+
+				if err = c.assemble(ctx, cancel, id); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						c.logger.Error("gossip.Cluster.assemble()", zap.Error(err))
+					}
+
+					return
+				}
+
+				if err = c.elect(ctx, cancel); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						c.logger.Error("gossip.Cluster.elect()", zap.Error(err))
+					}
+
+					return
+				}
+
+				if err = c.assign(ctx, cancel); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						c.logger.Error("gossip.Cluster.assign()", zap.Error(err))
+					}
+
+					return
+				}
+
+				if err = c.start(ctx, cancel); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						c.logger.Error("gossip.Cluster.assign()", zap.Error(err))
+					}
+
+					return
+				}
 			}()
 		case id = <-c.leaveCh:
 			if oldCancel != nil {
 				oldCancel()
 			}
-			c.State.RemoveNode(id)
-			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(c.Config.AssembleTimeoutS)*time.Second)
+
+			ctx, cancel := makeContext(c.Config.AssembleTimeoutS)
 			oldCancel = cancel
-			finishCh := make(chan struct{}, 1)
-			go c.electLeader(ctx, finishCh)
+
 			go func() {
-				select {
-				case <-finishCh:
-					cancel()
-				case <-ctx.Done():
+				runtime.Gosched()
+
+				if err = c.stop(ctx, cancel); err != nil {
+					c.logger.Error("gossip.Cluster.stop()", zap.Error(err))
+					return
 				}
 
-				oldCancel = nil
+				c.State.RemoveNode(id)
+
+				if err = c.elect(ctx, cancel); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						c.logger.Error("gossip.Cluster.elect()", zap.Error(err))
+					}
+
+					return
+				}
+
+				if err = c.assign(ctx, cancel); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						c.logger.Error("gossip.Cluster.assign()", zap.Error(err))
+					}
+
+					return
+				}
 			}()
 		}
 	}
 }
 
-func (c *Cluster) join(ctx context.Context) error {
+func (c *Cluster) join() error {
 	var err error
 
 	if err = c.State.Trigger(Join); err != nil {
-		return err
+		return fmt.Errorf("gossip.Cluster.join(), trigger 'Join' error: %w", err)
 	}
 
-	for {
-		_, err = c.Memberlist.Join(c.Config.JoinNodes)
-		if err == nil {
-			if err = c.State.Trigger(Joined); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-			c.logger.Error("gossip.Cluster.join(), context canceled", zap.Error(err))
-
-			return err
-		case <-time.After(time.Second):
-		}
+	if _, err = c.Memberlist.Join(c.Config.JoinNodes); err != nil {
+		return fmt.Errorf("gossip.Cluster.join() MemberList.Join error: %w", err)
 	}
+
+	if err = c.State.Trigger(Joined); err != nil {
+		return fmt.Errorf("gossip.Cluster.join(), trigger 'Joined' error: %w", err)
+	}
+
+	return nil
 }
 
-func (c *Cluster) assemble(ctx context.Context, finishCh chan struct{}, id uint16) {
+func (c *Cluster) assemble(ctx context.Context, cancel context.CancelFunc, id uint16) error {
 	var err error
 
-	for {
-		if err = c.State.Trigger(Assemble); err == nil {
-			break
-		}
-
-		select {
-		case <-ctx.Done():
-			c.logger.Error("gossip.Cluster.assemble(), context canceled", zap.Error(ctx.Err()))
-		case <-time.After(time.Second):
-		}
-	}
-
-	for {
-		if c.State.HasNode(id) {
-			if err = c.State.Trigger(Assembled); err != nil {
-				finishCh <- struct{}{}
-				c.logger.Fatal("gossip.Cluster.assemble(), trigger event Assembled", zap.Error(err))
-			} else {
-				break
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			c.logger.Error("gossip.Cluster.assemble(), context canceled", zap.Error(ctx.Err()))
-		case <-time.After(time.Second):
-		}
-	}
-
-	c.electLeader(ctx, finishCh)
-}
-
-func (c *Cluster) electLeader(ctx context.Context, finishCh chan struct{}) {
-	var err error
-
-	if err = c.State.Trigger(Elect); err != nil {
-		c.logger.Fatal("gossip.Cluster.electLeader(), trigger event Elect", zap.Error(err))
-	}
-
-	for {
-		if c.State.ElectLeader() {
-			if err = c.State.Trigger(Elected); err != nil {
-				c.logger.Fatal("gossip.Cluster.electLeader(), trigger event Elected", zap.Error(err))
-			}
-
-			break
-		}
-
-		select {
-		case <-ctx.Done():
-			c.logger.Error("gossip.Cluster.electLeader(), context canceled", zap.Error(ctx.Err()))
-		case <-time.After(time.Second):
-		}
-	}
-
-	c.assignWorkers(ctx, finishCh)
-}
-
-func (c *Cluster) assignWorkers(ctx context.Context, finishCh chan struct{}) {
-	var err error
-
-	if err = c.State.Trigger(Assign); err != nil {
-		c.logger.Fatal("gossip.Cluster.assignWorkers(), trigger event Assign", zap.Error(err))
-	}
-
-	c.State.AssignWorkers()
-
-	if err = c.State.Trigger(Assigned); err != nil {
-		c.logger.Fatal("gossip.Cluster.assignWorkers(), trigger event Assigned", zap.Error(err))
+	if c.State.HasNode(id) {
+		return nil
 	}
 
 	select {
 	case <-ctx.Done():
-		c.logger.Error("gossip.Cluster.electLeader(), context canceled", zap.Error(ctx.Err()))
-	case finishCh <- struct{}{}:
+		c.logger.Warn("gossip.Cluster.assemble()", zap.Error(ctx.Err()))
+		return nil
+	default:
+		if err = c.State.Trigger(Assemble); err != nil {
+			cancel()
+			c.logger.Warn("gossip.Cluster.assemble()", zap.Error(ctx.Err()))
+		}
 	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Warn("gossip.Cluster.assemble()", zap.Error(ctx.Err()))
+			return nil
+		default:
+		}
+
+		if c.State.HasNode(id) {
+			if err = c.State.Trigger(Assembled); err != nil {
+				cancel()
+				return fmt.Errorf("gossip.Cluster.assemble(): %w", err)
+			}
+
+			return nil
+		}
+
+		<-time.After(time.Second)
+	}
+}
+
+func (c *Cluster) elect(ctx context.Context, cancel context.CancelFunc) error {
+	var err error
+
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("gossip.Cluster.elect()", zap.Error(ctx.Err()))
+		return ctx.Err()
+	default:
+		if err = c.State.Trigger(Elect); err != nil {
+			cancel()
+			c.logger.Warn("gossip.Cluster.elect()", zap.Error(ctx.Err()))
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Warn("gossip.Cluster.elect()", zap.Error(ctx.Err()))
+			return ctx.Err()
+		default:
+		}
+
+		if c.State.ElectLeader() {
+			if err = c.State.Trigger(Elected); err != nil {
+				cancel()
+				return fmt.Errorf("gossip.Cluster.elect(): %w", err)
+			}
+
+			break
+		}
+
+		<-time.After(time.Second)
+	}
+
+	return nil
+}
+
+func (c *Cluster) assign(ctx context.Context, cancel context.CancelFunc) error {
+	var err error
+
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("gossip.Cluster.assign(), context canceled", zap.Error(ctx.Err()))
+		return ctx.Err()
+	default:
+		if err = c.State.Trigger(Assign); err != nil {
+			cancel()
+			return fmt.Errorf("gossip.Cluster.assign(): %w", err)
+		}
+	}
+
+	c.State.AssignWorkers()
+
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("gossip.Cluster.assign(), context canceled", zap.Error(ctx.Err()))
+		return ctx.Err()
+	default:
+		if err = c.State.Trigger(Assigned); err != nil {
+			cancel()
+			return fmt.Errorf("gossip.Cluster.assign(), trigger 'Assigned' error: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (c *Cluster) start(ctx context.Context, cancel context.CancelFunc) error {
+	var err error
+
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("gossip.Cluster.start()", zap.Error(ctx.Err()))
+		return ctx.Err()
+	default:
+		if err = c.State.Trigger(Start); err != nil {
+			cancel()
+			return fmt.Errorf("gossip.Cluster.start(): %w", err)
+		}
+	}
+
+	c.State.StartWorkers()
+
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("gossip.Cluster.start()", zap.Error(ctx.Err()))
+		return ctx.Err()
+	default:
+		if err = c.State.Trigger(Started); err != nil {
+			cancel()
+			return fmt.Errorf("gossip.Cluster.start(): %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (c *Cluster) stop(ctx context.Context, cancel context.CancelFunc) error {
+	var err error
+
+	if c.State.CurrentState() == Configuring && !c.State.LocalNodeState().Working {
+		return nil
+	}
+
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("gossip.Cluster.start()", zap.Error(ctx.Err()))
+		return ctx.Err()
+	default:
+		if err = c.State.Trigger(Stop); err != nil {
+			cancel()
+			c.logger.Warn("gossip.Cluster.assign()", zap.Error(err))
+			return nil
+		}
+	}
+
+	c.State.StopWorkers()
+
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("gossip.Cluster.start()", zap.Error(ctx.Err()))
+		return ctx.Err()
+	default:
+		if err = c.State.Trigger(Stopped); err != nil {
+			cancel()
+			return fmt.Errorf("gossip.Cluster.assign() error: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func newMemberListConfig(c *Config) *memberlist.Config {
@@ -268,5 +412,33 @@ func newTlq(ml *memberlist.Memberlist) *memberlist.TransmitLimitedQueue {
 			return ml.NumMembers()
 		},
 		RetransmitMult: 3,
+	}
+}
+
+func makeContext(timeoutSec int) (context.Context, context.CancelFunc) {
+	finishCh := make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(timeoutSec)*time.Second)
+
+	go func() {
+		runtime.Gosched()
+
+		select {
+		case <-finishCh:
+			cancel()
+		case <-ctx.Done():
+		}
+
+		if cancel != nil {
+			cancel = nil
+		}
+	}()
+
+	return ctx, func() {
+		select {
+		case <-finishCh:
+			return
+		default:
+			close(finishCh)
+		}
 	}
 }
