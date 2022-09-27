@@ -64,7 +64,7 @@ func (c *Cluster) init() {
 
 	c.Messenger = newMessenger(c.logger, c.Memberlist, tlq)
 
-	if len(c.Config.JoinNodes) > 0 {
+	if !c.Config.First {
 		if err = c.join(); err != nil {
 			c.logger.Error("gossip.Cluster.join()", zap.Error(err))
 		}
@@ -72,19 +72,6 @@ func (c *Cluster) init() {
 		//c.joinCh <- c.Config.NodeID
 		c.State.SetState(Idle)
 	}
-
-	go func() {
-		runtime.Gosched()
-
-		if c.Memberlist.LocalNode().Port != 8082 {
-			return
-		}
-		<-time.After(16 * time.Second)
-		c.logger.Info("Shutting down node 2")
-		if err = c.Memberlist.Shutdown(); err != nil {
-			c.logger.Fatal("Memberlist.Shutdown error", zap.Error(err))
-		}
-	}()
 }
 
 func (c *Cluster) onJoinOrLeave() {

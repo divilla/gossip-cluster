@@ -3,6 +3,7 @@ package gossip
 import (
 	"github.com/looplab/fsm"
 	"go.uber.org/zap"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -150,7 +151,7 @@ func (s *StateManager) ElectLeader() bool {
 
 	// choose node with the smallest Config.NodeID
 	i := 0
-	min := s.LocalNodeState().Leader
+	min := uint16(math.MaxUint16)
 	for id := range s.state.Nodes {
 		if id < min {
 			min = id

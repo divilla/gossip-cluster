@@ -3,7 +3,6 @@ package gossip
 import (
 	"github.com/looplab/fsm"
 	"go.uber.org/zap"
-	"math"
 	"time"
 )
 
@@ -76,7 +75,6 @@ func newState(localNodeID uint16, localNodeName string, localNodeState StateName
 			localNodeID: {
 				Name:      localNodeName,
 				State:     localNodeState,
-				Leader:    math.MaxUint16,
 				Workers:   make([]string, 0),
 				Timestamp: time.Now().UTC(),
 			},

@@ -16,6 +16,7 @@ type (
 		AdvertisePort      int    `yaml:"advertise_port"`
 		PushPullIntervalMS int    `yaml:"push_pull_interval_ms"`
 
+		First            bool     `yaml:"first"`
 		JoinNodes        []string `yaml:"join_nodes"`
 		JoinNodesNum     int      `yaml:"join_nodes_num"`
 		JoinTimeoutS     int      `yaml:"join_timeout_s"`
